@@ -1,11 +1,11 @@
 :root {
   --bg: #15161a; --panel: #1d1f25; --line: #2e313a; --text: #e6e6ea; --muted: #8b8f9a;
-  --accent: #7c9cff; --user: #232a3f; --ooc: #d6a23a;
+  --accent: #7c9cff; --dialogue: #8fd6ff; --user: #232a3f; --ooc: #d6a23a;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root { --bg: #f5f5f7; --panel: #fff; --line: #dcdce2; --text: #1c1d22; --muted: #6a6e7a;
-    --accent: #3558d6; --user: #e6ecff; --ooc: #a8700a; color-scheme: light; }
+    --accent: #3558d6; --dialogue: #0a5c9e; --user: #e6ecff; --ooc: #a8700a; color-scheme: light; }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -73,3 +73,4 @@ figure details { font-size: 13px; color: var(--muted); margin-top: 4px; }
 .imgpanel img { max-width: 100%; max-height: 70vh; border-radius: 8px; display: block; margin-bottom: 8px; }
 .imgpanel .imgprompt { min-height: 70px; font-size: 14px; resize: none; overflow: hidden; }
 .imgerror { background: #5a1f24; color: #ffd7d9; border-radius: 8px; padding: 6px 10px; font-size: 13px; margin-bottom: 6px; }
+.dialogue { color: var(--dialogue); font-weight: 600; }

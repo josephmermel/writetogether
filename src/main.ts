@@ -7,11 +7,17 @@ import { load, save, uid, text, type Message, type State } from './store';
 marked.setOptions({ breaks: true, gfm: true });
 
 const OOC_RE = /\[OOC:\s*([\s\S]*?)\]/gi;
-const md = (src: string) =>
-  DOMPurify.sanitize(
-    marked.parse(src.replace(OOC_RE, (_, t) => `<span class="ooc-inline">OOC · ${t}</span>`)) as string,
-    { ADD_ATTR: ['target'] },
-  );
+// Highlights "straight" and “curly” quoted dialogue, and styles [OOC: …] notes.
+// Code spans/fences are left untouched; quotes don't span line breaks.
+const DIALOGUE_RE = /("[^"\n]+"|“[^“”\n]+”)/g;
+function decorate(src: string): string {
+  return src.split(/(```[\s\S]*?```|`[^`\n]*`|\[OOC:[\s\S]*?\])/i).map((part, i) => {
+    if (i % 2 === 0) return part.replace(DIALOGUE_RE, '<span class="dialogue">$1</span>');
+    if (/^\[OOC:/i.test(part)) return `<span class="ooc-inline">OOC · ${part.slice(5, -1).trim()}</span>`;
+    return part;
+  }).join('');
+}
+const md = (src: string) => DOMPurify.sanitize(marked.parse(decorate(src)) as string);
 
 let state: State;
 let editingId: string | null = null;
