@@ -62,10 +62,14 @@ figure { margin: 10px 0 0; }
 figure img { max-width: 100%; max-height: 70vh; border-radius: 8px; display: block; }
 figure details { font-size: 13px; color: var(--muted); margin-top: 4px; }
 #composer { display: flex; gap: 8px; padding: 12px 16px; max-width: 820px; width: 100%; margin: 0 auto; align-items: flex-end; }
-#composer textarea { flex: 1; resize: none; }
+#composer textarea { flex: 1; resize: none; min-height: 110px; max-height: 45vh; overflow-y: auto; font-size: 16px; }
 #ooc.on { background: var(--ooc); border-color: var(--ooc); color: #000; }
 @media (max-width: 760px) {
   #app { flex-direction: column; }
   #side { width: 100%; max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }
   #system { min-height: 70px; }
 }
+.imgpanel { margin-top: 10px; }
+.imgpanel img { max-width: 100%; max-height: 70vh; border-radius: 8px; display: block; margin-bottom: 8px; }
+.imgpanel .imgprompt { min-height: 70px; font-size: 14px; resize: none; overflow: hidden; }
+.imgerror { background: #5a1f24; color: #ffd7d9; border-radius: 8px; padding: 6px 10px; font-size: 13px; margin-bottom: 6px; }

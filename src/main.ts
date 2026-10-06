@@ -74,6 +74,12 @@ async function generate(target?: Message) {
   persist(); render();
 }
 
+function fitInput() {
+  const el = $<HTMLTextAreaElement>('#input');
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 2 + 'px'; // CSS max-height caps this, then it scrolls
+}
+
 function send() {
   const input = $<HTMLTextAreaElement>('#input');
   const t = input.value.trim();
@@ -85,34 +91,39 @@ function send() {
   }
   state.messages.push({ id: uid(), role: 'user', ooc: oocMode || undefined, variants: [t], active: 0 });
   input.value = '';
+  fitInput();
   persist();
   generate();
 }
 
-async function makeImage(m: Message) {
+/** mode 'draft': LLM drafts a fresh prompt, then renders it. 'render': render the (possibly edited) prompt as-is. */
+async function makeImage(m: Message, mode: 'draft' | 'render') {
   const s = state.settings;
   if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
   banner = '';
-  imageBusy.set(m.id, 'Drafting image prompt…'); render();
+  m.image ??= { prompt: '' };
+  m.image.error = undefined;
   try {
-    const idx = state.messages.indexOf(m);
-    const recent = state.messages.slice(0, idx + 1).filter(x => !x.ooc).slice(-6)
-      .map(x => `${x.role === 'user' ? 'USER' : 'NARRATOR'}: ${text(x).replace(OOC_RE, '')}`).join('\n\n');
-    const prompt = await completeChat(s.apiKey, s.promptModel || s.chatModel, [
-      { role: 'system', content:
-        'You write prompts for a text-to-image model. Given a roleplay setting and the latest part of the story, ' +
-        'write ONE vivid, concrete image prompt (max 90 words) depicting the final moment: subjects with physical ' +
-        'appearance and clothing, pose, expression, setting, lighting, camera angle, art style. Keep character ' +
-        'appearance consistent with the setting notes. No dialogue, no names without visual description, no ' +
-        'commentary. Output only the prompt.' },
-      { role: 'user', content: `SETTING NOTES:\n${state.system.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
-    ]);
+    if (mode === 'draft' || !m.image.prompt.trim()) {
+      imageBusy.set(m.id, 'Drafting image prompt…'); render();
+      const idx = state.messages.indexOf(m);
+      const recent = state.messages.slice(0, idx + 1).filter(x => !x.ooc).slice(-6)
+        .map(x => `${x.role === 'user' ? 'USER' : 'NARRATOR'}: ${text(x).replace(OOC_RE, '')}`).join('\n\n');
+      m.image.prompt = await completeChat(s.apiKey, s.promptModel || s.chatModel, [
+        { role: 'system', content:
+          'You write prompts for a text-to-image model. Given a roleplay setting and the latest part of the story, ' +
+          'write ONE vivid, concrete image prompt (max 90 words) depicting the final moment: subjects with physical ' +
+          'appearance and clothing, pose, expression, setting, lighting, camera angle, art style. Keep character ' +
+          'appearance consistent with the setting notes. No dialogue, no names without visual description, no ' +
+          'commentary. Output only the prompt.' },
+        { role: 'user', content: `SETTING NOTES:\n${state.system.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
+      ]);
+      persist();
+    }
     imageBusy.set(m.id, 'Generating image…'); render();
-    const src = await generateImage(s.apiKey, s.imageModel, prompt, s.aspect);
-    m.image = { src, prompt };
-    persist();
-  } catch (e) { banner = `Image failed: ${(e as Error).message}`; }
-  imageBusy.delete(m.id); render();
+    m.image.src = await generateImage(s.apiKey, s.imageModel, m.image.prompt.trim(), s.aspect);
+  } catch (e) { m.image.error = (e as Error).message; }
+  imageBusy.delete(m.id); persist(); render();
 }
 
 function scrollIfNear() {
@@ -143,7 +154,7 @@ function msgEl(m: Message, i: number): HTMLElement {
     `<button data-a="${a}" title="${title}"${dis ? ' disabled' : ''}>${label}</button>`;
   actions.innerHTML =
     btn('edit', '✎', 'Edit', busy) +
-    (m.role === 'assistant' || m.role === 'user' ? btn('img', '🖼', 'Generate companion image', busy || imageBusy.has(m.id)) : '') +
+    (m.role === 'assistant' || m.role === 'user' ? btn('img', '🖼', 'Generate companion image', busy || imageBusy.has(m.id) || !!m.image) : '') +
     (isLast ? btn('regen', '↻', m.role === 'assistant' ? 'Get an alternative answer' : 'Get a reply', busy) : '') +
     btn('del', '🗑', 'Delete this message', busy);
   head.append(actions);
@@ -168,16 +179,36 @@ function msgEl(m: Message, i: number): HTMLElement {
   const status = imageBusy.get(m.id);
   if (status) el.insertAdjacentHTML('beforeend', `<div class="imgstatus">${status}</div>`);
   if (m.image) {
-    const fig = document.createElement('figure');
-    const img = document.createElement('img');
-    img.src = m.image.src; img.alt = m.image.prompt;
-    const det = document.createElement('details');
-    const sum = document.createElement('summary'); sum.textContent = 'Image prompt';
-    const p = document.createElement('p'); p.textContent = m.image.prompt;
-    det.append(sum, p);
-    const rm = document.createElement('button');
-    rm.dataset.a = 'rmimg'; rm.className = 'link'; rm.textContent = 'remove image';
-    fig.append(img, det, rm);
+    const im = m.image;
+    const working = imageBusy.has(m.id);
+    const fig = document.createElement('div');
+    fig.className = 'imgpanel';
+    if (im.src) {
+      const img = document.createElement('img');
+      img.src = im.src; img.alt = im.prompt;
+      fig.append(img);
+    }
+    if (im.error) {
+      const err = document.createElement('div');
+      err.className = 'imgerror'; err.textContent = im.error;
+      fig.append(err);
+    }
+    const lbl = document.createElement('label');
+    lbl.textContent = 'Image prompt (editable)';
+    const ta = document.createElement('textarea');
+    ta.className = 'imgprompt'; ta.value = im.prompt; ta.disabled = working;
+    ta.placeholder = 'Prompt for the image model…';
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
+    ta.addEventListener('input', () => { im.prompt = ta.value; fit(); persist(); });
+    queueMicrotask(fit);
+    const row = document.createElement('div');
+    row.className = 'editrow';
+    const b = (a: string, label: string, cls = '') =>
+      `<button data-a="${a}" class="${cls}"${working ? ' disabled' : ''}>${label}</button>`;
+    row.innerHTML =
+      b('imgrender', im.error ? 'Retry' : im.src ? 'Regenerate image' : 'Generate image', 'primary') +
+      b('imgdraft', 'Redraft prompt') + b('rmimg', 'Remove');
+    fig.append(lbl, ta, row);
     el.append(fig);
   }
   return el;
@@ -215,7 +246,9 @@ function onChatClick(e: MouseEvent) {
       if (!confirm('Delete this message?')) return;
       state.messages.splice(state.messages.indexOf(m), 1); persist(); break;
     case 'regen': return void (m.role === 'assistant' ? generate(m) : generate());
-    case 'img': return void makeImage(m);
+    case 'img': return void makeImage(m, 'draft');
+    case 'imgdraft': return void makeImage(m, 'draft');
+    case 'imgrender': return void makeImage(m, 'render');
     case 'rmimg': delete m.image; persist(); break;
   }
   render();
@@ -253,7 +286,7 @@ function buildUI() {
     <div id="chat"></div>
     <form id="composer">
       <button type="button" id="ooc" title="Send as an out-of-character message">OOC</button>
-      <textarea id="input" rows="2"></textarea>
+      <textarea id="input" ></textarea>
       <button id="send" class="primary" type="submit">Send</button>
     </form>
   </main>`;
@@ -277,6 +310,7 @@ function buildUI() {
     e.preventDefault();
     if (streamingId) abort?.abort(); else send();
   });
+  $('#input').addEventListener('input', fitInput);
   $('#input').addEventListener('keydown', e => {
     const k = e as KeyboardEvent;
     if (k.key === 'Enter' && !k.shiftKey && !k.isComposing) { k.preventDefault(); if (!streamingId) send(); }
