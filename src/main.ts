@@ -2,6 +2,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import './style.css';
 import { streamChat, completeChat, generateImage, type ChatMsg } from './api';
+import { IMAGE_MODELS, modelLabel } from './models';
 import { load, save, uid, text, type Message, type State } from './store';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -127,7 +128,7 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
       persist();
     }
     imageBusy.set(m.id, 'Generating image…'); render();
-    m.image.src = await generateImage(s.apiKey, s.imageModel, m.image.prompt.trim(), s.aspect);
+    m.image.src = await generateImage(s.apiKey, m.image.model ?? s.imageModel, m.image.prompt.trim(), s.aspect);
   } catch (e) { m.image.error = (e as Error).message; }
   imageBusy.delete(m.id); persist(); render();
 }
@@ -207,6 +208,18 @@ function msgEl(m: Message, i: number): HTMLElement {
     const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
     ta.addEventListener('input', () => { im.prompt = ta.value; fit(); persist(); });
     queueMicrotask(fit);
+    const sel = document.createElement('select');
+    sel.className = 'imgmodel'; sel.disabled = working;
+    const cur = im.model ?? state.settings.imageModel;
+    const opts = IMAGE_MODELS.map(x => `<option value="${x.id}">${modelLabel(x)}</option>`);
+    if (!IMAGE_MODELS.some(x => x.id === cur)) opts.unshift(`<option value="${cur}">${cur} (custom)</option>`);
+    sel.innerHTML = opts.join('');
+    sel.value = cur;
+    sel.addEventListener('change', () => {
+      im.model = sel.value; state.settings.imageModel = sel.value; // remembered as the new default
+      $<HTMLInputElement>('#imageModel').value = sel.value;
+      persist();
+    });
     const row = document.createElement('div');
     row.className = 'editrow';
     const b = (a: string, label: string, cls = '') =>
@@ -214,7 +227,7 @@ function msgEl(m: Message, i: number): HTMLElement {
     row.innerHTML =
       b('imgrender', im.error ? 'Retry' : im.src ? 'Regenerate image' : 'Generate image', 'primary') +
       b('imgdraft', 'Redraft prompt') + b('rmimg', 'Remove');
-    fig.append(lbl, ta, row);
+    fig.append(lbl, ta, sel, row);
     el.append(fig);
   }
   return el;

@@ -1,3 +1,5 @@
+import { modelInfo } from './models';
+
 const BASE = 'https://openrouter.ai/api/v1';
 
 export interface ChatMsg { role: 'system' | 'user' | 'assistant'; content: string }
@@ -66,9 +68,13 @@ export async function completeChat(key: string, model: string, messages: ChatMsg
 
 /** Text-to-image via OpenRouter's /images endpoint. Returns a data: or http URL. */
 export async function generateImage(key: string, model: string, prompt: string, aspect: string): Promise<string> {
+  const prov = modelInfo(model)?.prov;
   const res = await fetch(`${BASE}/images`, {
     method: 'POST', headers: headers(key),
-    body: JSON.stringify({ model, prompt, n: 1, aspect_ratio: aspect }),
+    body: JSON.stringify({
+      model, prompt, n: 1, aspect_ratio: aspect,
+      ...(prov && { provider: { options: { [prov[0]]: prov[1] } } }),
+    }),
   });
   if (!res.ok) return fail(res);
   const item = (await res.json()).data?.[0];

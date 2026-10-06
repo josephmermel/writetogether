@@ -4,7 +4,7 @@ export interface Message {
   ooc?: boolean;            // user message sent as [OOC: ...]
   variants: string[];       // alternative answers (regenerate keeps the old ones)
   active: number;
-  image?: { src?: string; prompt: string; error?: string };
+  image?: { src?: string; prompt: string; error?: string; model?: string };
 }
 
 export interface Settings {

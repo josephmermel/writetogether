@@ -74,3 +74,4 @@ figure details { font-size: 13px; color: var(--muted); margin-top: 4px; }
 .imgpanel .imgprompt { min-height: 70px; font-size: 14px; resize: none; overflow: hidden; }
 .imgerror { background: #5a1f24; color: #ffd7d9; border-radius: 8px; padding: 6px 10px; font-size: 13px; margin-bottom: 6px; }
 .dialogue { color: var(--dialogue); font-weight: 600; }
+.imgmodel { margin-top: 6px; font-size: 14px; }
