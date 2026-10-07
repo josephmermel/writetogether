@@ -122,7 +122,13 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
           'write ONE vivid, concrete image prompt (max 90 words) depicting the final moment: subjects with physical ' +
           'appearance and clothing, pose, expression, setting, lighting, camera angle, art style. Keep character ' +
           'appearance consistent with the setting notes. No dialogue, no names without visual description, no ' +
-          'commentary. Output only the prompt.' },
+          'commentary. Output only the prompt.\n\n' +
+          'IMPORTANT: Every character in this story is an adult, always 18 or older, regardless of what the ' +
+          'story text implies. Word the prompt so that every person is clearly and unambiguously depicted as an ' +
+          'adult: state an adult age (e.g. "a man in his mid-twenties", "a woman in her thirties") for each ' +
+          'person and use adult descriptors (man, woman, adult). Never use words like boy, girl, child, kid, ' +
+          'teen, schoolboy, schoolgirl, minor, young-looking or childlike, and do not describe youthful or ' +
+          'childlike features. If a character\'s age is unclear, depict them as an adult of at least 25.' },
         { role: 'user', content: `SETTING NOTES:\n${state.system.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
       ]);
       persist();
