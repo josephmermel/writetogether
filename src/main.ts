@@ -196,7 +196,7 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
     imageBusy.set(m.id, 'Generating image…'); render();
     const model = im.model ?? s.imageModel;
     const info = modelInfo(model);
-    const use = info?.maxRefs ? (im.refs ?? withPortrait()).filter(w => state.cast[w].image).slice(0, info.maxRefs) : [];
+    const use = state.settings.useRefs && info?.maxRefs ? (im.refs ?? withPortrait()).filter(w => state.cast[w].image).slice(0, info.maxRefs) : [];
     let final = im.prompt.trim();
     if (use.length) {
       final = 'Use the reference images for character identity. ' +
@@ -225,7 +225,7 @@ function scrollIfNear() {
 /** Which character portraits go to the image model as references, with the extra cost for this model. */
 function refsRow(m: Message): HTMLElement | null {
   const avail = withPortrait();
-  if (!avail.length) return null;
+  if (!avail.length || !state.settings.useRefs) return null;
   const row = document.createElement('div');
   row.className = 'refsrow';
   const info = modelInfo(m.image?.model ?? state.settings.imageModel);
@@ -527,6 +527,7 @@ function render() {
   $('#v-paged').classList.toggle('on', paged);
   $('#v-chat').classList.toggle('on', !paged);
   ($('#autoImage') as HTMLInputElement).checked = state.settings.autoImage;
+  ($('#useRefs') as HTMLInputElement).checked = state.settings.useRefs;
 
   if (paged) {
     renderPager();
@@ -737,7 +738,10 @@ function buildUI() {
         <span id="pageno"></span>
         <button id="p-next" title="Next page (→)">›</button><button id="p-last" title="Latest page">»</button>
       </div>
-      <label class="auto" title="Generate a companion image after every reply"><input type="checkbox" id="autoImage" /> Auto photo</label>
+      <div class="toggles">
+        <label class="auto" title="Send the character portraits to the image model as reference images. Off = rely on the written appearance descriptions only."><input type="checkbox" id="useRefs" /> Reference images</label>
+        <label class="auto" title="Generate a companion image after every reply"><input type="checkbox" id="autoImage" /> Auto photo</label>
+      </div>
     </div>
     <div id="chat"></div>
     <div id="pager"><div id="pagetext"></div><div id="pageimg"></div></div>
@@ -779,6 +783,7 @@ function buildUI() {
   $('#toggleSide').addEventListener('click', () => { state.settings.sidebar = !state.settings.sidebar; persist(); render(); });
   $('#v-paged').addEventListener('click', () => setView('paged'));
   $('#v-chat').addEventListener('click', () => setView('chat'));
+  $('#useRefs').addEventListener('change', e => { state.settings.useRefs = (e.target as HTMLInputElement).checked; persist(); render(); });
   $('#autoImage').addEventListener('change', e => { state.settings.autoImage = (e.target as HTMLInputElement).checked; persist(); });
   const nav = () => pageIndex(pages().length);
   $('#p-first').addEventListener('click', () => goto(0));

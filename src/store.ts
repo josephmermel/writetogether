@@ -22,6 +22,7 @@ export interface Settings {
   imageModel: string;
   aspect: string;
   systemPrompt: string;     // part of settings (saved with the settings file)
+  useRefs: boolean;         // send character portraits to the image model as reference images
   autoImage: boolean;       // generate a companion image automatically after each reply
   view: 'paged' | 'chat';
   sidebar: boolean;         // setup sidebar (scene, characters, settings) shown
@@ -46,6 +47,7 @@ export const defaults: State = {
     imageModel: DEFAULT_IMAGE_MODEL,
     aspect: '3:4',
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    useRefs: true,
     autoImage: false,
     view: 'paged',
     sidebar: true,
