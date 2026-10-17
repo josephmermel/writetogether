@@ -2,3 +2,4 @@ node_modules
 dist
 tools/model-test/prompt.txt
 tools/model-test/results/
+tools/model-test/portrait-*.txt
