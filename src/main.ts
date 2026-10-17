@@ -399,10 +399,20 @@ function imagePane(m: Message): HTMLElement {
 
   const stage = document.createElement('div');
   stage.className = 'stage';
+  let frame: HTMLElement | null = null;
   if (im?.src) {
+    // The frame hugs the picture: sized to its real aspect ratio, so the rounded corners sit on the image itself.
+    stage.classList.add('has-img');
+    const [aw, ah] = state.settings.aspect.split(':').map(Number);
+    stage.style.setProperty('--ar-n', String(aw && ah ? aw / ah : 0.75));
+    frame = document.createElement('div');
+    frame.className = 'frame';
     const img = document.createElement('img');
-    img.src = im.src; img.alt = im.prompt;
-    stage.append(img);
+    img.alt = im.prompt;
+    img.onload = () => stage.style.setProperty('--ar-n', String(img.naturalWidth / img.naturalHeight));
+    img.src = im.src;
+    frame.append(img);
+    stage.append(frame);
   } else {
     const hint = document.createElement('div');
     hint.className = 'hint';
@@ -411,7 +421,7 @@ function imagePane(m: Message): HTMLElement {
       : 'No image yet';
     stage.append(hint);
   }
-  if (status) stage.insertAdjacentHTML('beforeend', `<div class="status">${status}</div>`);
+  if (status) (frame ?? stage).insertAdjacentHTML('beforeend', `<div class="status">${status}</div>`);
   el.append(stage);
   if (im?.error) el.insertAdjacentHTML('beforeend', '<div class="imgerror"></div>');
   if (im?.error) el.querySelector('.imgerror')!.textContent = im.error;

@@ -139,3 +139,8 @@ main { min-height: 0; }
 .refsrow input { width: auto; }
 .char .editrow { flex-wrap: wrap; }
 .char .editrow button { padding: 4px 10px; font-size: 13px; }
+.stage.has-img { container-type: size; background: none; border: none; overflow: visible; }
+.stage .frame { position: relative; width: min(100cqw, calc(100cqh * var(--ar-n, 0.75))); aspect-ratio: var(--ar-n, 0.75);
+  border-radius: 14px; overflow: hidden; box-shadow: 0 2px 14px rgba(0, 0, 0, .3); }
+.stage .frame img { width: 100%; height: 100%; object-fit: cover; display: block; max-width: none; max-height: none; }
+@media (max-width: 900px) { .stage.has-img { height: 40vh; } }
