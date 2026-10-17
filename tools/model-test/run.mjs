@@ -8,6 +8,8 @@
 //   Needs tools/model-test/portrait-a.txt and portrait-b.txt (one text-to-image prompt per character, gitignored),
 //   unless --portraits is given. The two portraits are generated once, then passed as input_references together
 //   with prompt.txt to every model in REF_MODELS. Reported cost includes any per-reference-image surcharge.
+//   Add --isolate to run four variants per model (text only / portrait A only / portrait B only / both) to find
+//   out WHAT gets blocked: the text, a particular portrait, or references in general. Blocked requests cost $0.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +65,8 @@ const ALL = [
 ];
 const MODELS = ALL.filter(m => (REFS ? REF_MODELS.includes(m.id) : true) && (!only?.length || only.includes(m.id)));
 
-const total = MODELS.reduce((s, m) => s + (m.est ?? 0.03), 0) + (REFS && !opt('portraits') ? 0.03 : 0);
+const VARIANTS = REFS && flag('isolate') ? 4 : 1;
+const total = MODELS.reduce((s, m) => s + (m.est ?? 0.03) * VARIANTS, 0) + (REFS && !opt('portraits') ? 0.03 : 0);
 console.log(`${MODELS.length} models, estimated total ≈ $${total.toFixed(2)} (budget $${BUDGET})`);
 if (flag('dry')) { MODELS.forEach(m => console.log(' ', m.id, m.est ?? '(token-priced)')); process.exit(0); }
 
@@ -130,13 +133,25 @@ const finalPrompt = REFS
     'person\'s face, hair and build consistent with their reference image. Scene: ' + prompt
   : prompt;
 
+const configs = REFS && flag('isolate')
+  ? [
+    { label: 'text only', prompt, refs: [] },
+    { label: 'portrait A only', prompt: finalPrompt, refs: refUrls.slice(0, 1) },
+    { label: 'portrait B only', prompt: finalPrompt, refs: refUrls.slice(1, 2) },
+    { label: 'both portraits', prompt: finalPrompt, refs: refUrls },
+  ]
+  : [{ label: '', prompt: finalPrompt, refs: refUrls }];
+
 for (const m of MODELS) {
-  if (spent + (m.est ?? 0.05) > BUDGET) { rows.push({ id: m.id, status: 'skipped (budget)' }); continue; }
-  const r = await gen(m.id, finalPrompt, { body: m.body, prov: m.prov, refs: refUrls });
-  const row = { id: m.id, settings: { ...m.body, ...(m.prov?.[1] ?? {}) }, cost: r.cost, status: r.status, ms: r.ms, error: r.error };
-  if (r.b64) row.file = save(`${m.id.replace(/\//g, '__')}.${r.ext}`, r);
-  rows.push(row);
-  console.log(`${row.status.padEnd(7)} ${m.id}  $${row.cost.toFixed(4)}  ${row.error ?? ''}`.slice(0, 200));
+  for (const c of configs) {
+    const id = c.label ? `${m.id} [${c.label}]` : m.id;
+    if (spent + (m.est ?? 0.05) > BUDGET) { rows.push({ id, status: 'skipped (budget)' }); continue; }
+    const r = await gen(m.id, c.prompt, { body: m.body, prov: m.prov, refs: c.refs });
+    const row = { id, settings: { ...m.body, ...(m.prov?.[1] ?? {}) }, cost: r.cost, status: r.status, ms: r.ms, error: r.error };
+    if (r.b64) row.file = save(`${id.replace(/[\/ \[\]]+/g, '_')}.${r.ext}`, r);
+    rows.push(row);
+    console.log(`${row.status.padEnd(7)} ${id}  $${row.cost.toFixed(4)}  ${row.error ?? ''}`.slice(0, 220));
+  }
 }
 rows.unshift(...extra);
 
