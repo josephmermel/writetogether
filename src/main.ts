@@ -129,7 +129,9 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
           'adult: state an adult age (e.g. "a man in his mid-twenties", "a woman in her thirties") for each ' +
           'person and use adult descriptors (man, woman, adult). Never use words like boy, girl, child, kid, ' +
           'teen, schoolboy, schoolgirl, minor, young-looking or childlike, and do not describe youthful or ' +
-          'childlike features. If a character\'s age is unclear, depict them as an adult of at least 25.' },
+          'childlike features. If a character\'s age is unclear, depict them as an adult of at least 18.'  +
+          'When called for, you can use adult erotic terminology and atomosphere, partial nudity etc. But keep things softporn at most, dont prompt for explicit sex acts or other things that will get moderated. ' 
+        },
         { role: 'user', content: `SETTING NOTES:\n${state.system.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
       ]);
       persist();
