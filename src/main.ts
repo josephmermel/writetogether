@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import './style.css';
 import { streamChat, completeChat, generateImage, type ChatMsg } from './api';
 import { IMAGE_MODELS, TEXT_MODELS, modelLabel } from './models';
+import { saveTextFile, openTextFile } from './files';
 import { load, save, uid, text, type Message, type State } from './store';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -327,13 +328,17 @@ function buildUI() {
       <label>Image aspect ratio</label>
       <select id="aspect"><option>1:1</option><option>3:4</option><option>4:3</option><option>16:9</option><option>9:16</option></select>
       <p class="hint">Your key is stored only in this browser and sent only to openrouter.ai.</p>
+      <div class="side-actions">
+        <button id="saveSettings" title="Save API key, models and system prompt to a file">Save settings…</button>
+        <button id="loadSettings" title="Load API key, models and system prompt from a file">Load settings…</button>
+      </div>
+      <p class="hint">Settings files include your API key in plain text. Keep them private.</p>
     </details>
     <div class="side-actions">
-      <button id="export">Export</button>
-      <button id="import">Import</button>
+      <button id="export">Export chat</button>
+      <button id="import">Import chat</button>
       <button id="clear" class="danger">New chat</button>
     </div>
-    <input id="file" type="file" accept="application/json" hidden />
   </aside>
   <main>
     <div id="banner" hidden></div>
@@ -376,23 +381,45 @@ function buildUI() {
     if (!confirm('Start a new chat? The current chat will be cleared (system instructions are kept).')) return;
     state.messages = []; persist(); render();
   });
+  const fail = (what: string) => (err: unknown) => { banner = `${what} failed: ${(err as Error).message}`; render(); };
   $('#export').addEventListener('click', () => {
     const { apiKey: _k, ...settings } = state.settings;
-    const blob = new Blob([JSON.stringify({ ...state, settings }, null, 1)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'writetogether-chat.json'; a.click();
+    saveTextFile('writetogether-chat.json', JSON.stringify({ ...state, settings }, null, 1)).catch(fail('Export'));
   });
-  $('#import').addEventListener('click', () => $('#file').click());
-  $('#file').addEventListener('change', async e => {
-    const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
+  $('#import').addEventListener('click', async () => {
     try {
-      const j = JSON.parse(await f.text());
+      const t = await openTextFile();
+      if (t === null) return;
+      const j = JSON.parse(t);
       if (!Array.isArray(j.messages)) throw new Error('not a chat export');
       state.system = j.system ?? ''; state.messages = j.messages;
       $<HTMLTextAreaElement>('#system').value = state.system;
       persist(); render();
-    } catch (err) { banner = `Import failed: ${(err as Error).message}`; render(); }
+    } catch (err) { fail('Import')(err); }
+  });
+  $('#saveSettings').addEventListener('click', () => {
+    const data = { app: 'writetogether-settings', version: 1, system: state.system, settings: state.settings };
+    saveTextFile('writetogether-settings.json', JSON.stringify(data, null, 1)).catch(fail('Save settings'));
+  });
+  $('#loadSettings').addEventListener('click', async () => {
+    try {
+      const t = await openTextFile();
+      if (t === null) return;
+      const j = JSON.parse(t);
+      if (j.app !== 'writetogether-settings' || typeof j.settings !== 'object' || !j.settings) {
+        throw new Error('not a WriteTogether settings file');
+      }
+      // Copy only known string fields so a malformed file can't inject anything else.
+      for (const k of Object.keys(state.settings) as (keyof typeof state.settings)[]) {
+        if (typeof j.settings[k] === 'string') state.settings[k] = j.settings[k];
+      }
+      if (typeof j.system === 'string') state.system = j.system;
+      $<HTMLTextAreaElement>('#system').value = state.system;
+      $<HTMLInputElement>('#apiKey').value = state.settings.apiKey;
+      $<HTMLSelectElement>('#aspect').value = state.settings.aspect;
+      Object.values(pickers).forEach(p => p.refresh());
+      banner = ''; persist(); render();
+    } catch (err) { fail('Load settings')(err); }
   });
 }
 
