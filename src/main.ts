@@ -36,7 +36,9 @@ const persist = () => save(state);
 
 function toChat(upTo: Message[]): ChatMsg[] {
   const out: ChatMsg[] = [];
-  if (state.system.trim()) out.push({ role: 'system', content: state.system.trim() });
+  const sys = [state.settings.systemPrompt.trim(), state.scene.trim() && `SCENE:\n${state.scene.trim()}`]
+    .filter(Boolean).join('\n\n');
+  if (sys) out.push({ role: 'system', content: sys });
   for (const m of upTo) {
     const t = text(m);
     out.push({ role: m.role, content: m.ooc ? `[OOC: ${t}]` : t });
@@ -146,7 +148,7 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
           'childlike features. If a character\'s age is unclear, depict them as an adult of at least 18. ' +
           'When called for, you can use adult erotic terminology and atmosphere, partial nudity etc. But keep things softporn at most, dont prompt for explicit sex acts or other things that will get moderated. ' 
         },
-        { role: 'user', content: `SETTING NOTES:\n${state.system.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
+        { role: 'user', content: `SETTING NOTES:\n${state.scene.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
       ]);
       persist();
     }
@@ -339,10 +341,12 @@ function buildUI() {
   $('#app').innerHTML = `
   <aside id="side">
     <h1>WriteTogether</h1>
-    <label>System instructions / scene</label>
-    <textarea id="system" placeholder="Describe the setting, characters, tone, rules of the roleplay…"></textarea>
+    <label>Scene <small>(optional, saved with this chat)</small></label>
+    <textarea id="scene" placeholder="Describe the setting, characters and situation for this story…"></textarea>
     <details id="settings">
       <summary>Settings</summary>
+      <label>System instructions <small>(saved with settings)</small></label>
+      <textarea id="systemPrompt" rows="6"></textarea>
       <label>OpenRouter API key</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-or-…" />
       <label>Chat model</label>
@@ -355,8 +359,8 @@ function buildUI() {
       <select id="aspect"><option>1:1</option><option>3:4</option><option>4:3</option><option>16:9</option><option>9:16</option></select>
       <p class="hint">Your key is stored only in this browser and sent only to openrouter.ai.</p>
       <div class="side-actions">
-        <button id="saveSettings" title="Save API key, models and system prompt to a file">Save settings…</button>
-        <button id="loadSettings" title="Load API key, models and system prompt from a file">Load settings…</button>
+        <button id="saveSettings" title="Save API key, models and system instructions to a file">Save settings…</button>
+        <button id="loadSettings" title="Load API key, models and system instructions from a file">Load settings…</button>
       </div>
       <p class="hint">Settings files include your API key in plain text. Keep them private.</p>
     </details>
@@ -387,7 +391,8 @@ function buildUI() {
     el.addEventListener('input', () => { set(el.value); persist(); });
   };
   const s = state.settings;
-  bind('system', () => state.system, v => state.system = v);
+  bind('scene', () => state.scene, v => state.scene = v);
+  bind('systemPrompt', () => s.systemPrompt, v => s.systemPrompt = v);
   bind('apiKey', () => s.apiKey, v => s.apiKey = v.trim());
   const textOpts = TEXT_MODELS.map(m => ({ value: m.id, label: m.label }));
   pickers.chatModel = modelPicker('chatModel', textOpts, () => s.chatModel, v => s.chatModel = v);
@@ -411,13 +416,15 @@ function buildUI() {
     if (k.key === 'Enter' && !k.shiftKey && !k.isComposing) { k.preventDefault(); if (!streamingId) send(); }
   });
   $('#clear').addEventListener('click', () => {
-    if (!confirm('Start a new chat? The current chat will be cleared (system instructions are kept).')) return;
-    state.messages = []; persist(); render();
+    if (!confirm('Start a new chat? The current chat will be cleared (the scene is cleared too; settings and system instructions are kept).')) return;
+    state.messages = []; state.scene = '';
+    $<HTMLTextAreaElement>('#scene').value = '';
+    persist(); render();
   });
   const fail = (what: string) => (err: unknown) => { banner = `${what} failed: ${(err as Error).message}`; render(); };
   $('#export').addEventListener('click', () => {
-    const { apiKey: _k, ...settings } = state.settings;
-    saveTextFile('writetogether-chat.json', JSON.stringify({ ...state, settings }, null, 1)).catch(fail('Export'));
+    const data = { app: 'writetogether-chat', version: 2, scene: state.scene, messages: state.messages };
+    saveTextFile('writetogether-chat.json', JSON.stringify(data, null, 1)).catch(fail('Export'));
   });
   $('#import').addEventListener('click', async () => {
     try {
@@ -425,13 +432,15 @@ function buildUI() {
       if (t === null) return;
       const j = JSON.parse(t);
       if (!Array.isArray(j.messages)) throw new Error('not a chat export');
-      state.system = j.system ?? ''; state.messages = j.messages;
-      $<HTMLTextAreaElement>('#system').value = state.system;
+      // Older exports stored the scene under "system".
+      state.scene = typeof j.scene === 'string' ? j.scene : typeof j.system === 'string' ? j.system : '';
+      state.messages = j.messages;
+      $<HTMLTextAreaElement>('#scene').value = state.scene;
       persist(); render();
     } catch (err) { fail('Import')(err); }
   });
   $('#saveSettings').addEventListener('click', () => {
-    const data = { app: 'writetogether-settings', version: 1, system: state.system, settings: state.settings };
+    const data = { app: 'writetogether-settings', version: 2, settings: state.settings };
     saveTextFile('writetogether-settings.json', JSON.stringify(data, null, 1)).catch(fail('Save settings'));
   });
   $('#loadSettings').addEventListener('click', async () => {
@@ -446,8 +455,11 @@ function buildUI() {
       for (const k of Object.keys(state.settings) as (keyof typeof state.settings)[]) {
         if (typeof j.settings[k] === 'string') state.settings[k] = j.settings[k];
       }
-      if (typeof j.system === 'string') state.system = j.system;
-      $<HTMLTextAreaElement>('#system').value = state.system;
+      // Version-1 settings files kept the system prompt at the top level.
+      if (typeof j.settings.systemPrompt !== 'string' && typeof j.system === 'string') {
+        state.settings.systemPrompt = j.system;
+      }
+      $<HTMLTextAreaElement>('#systemPrompt').value = state.settings.systemPrompt;
       $<HTMLInputElement>('#apiKey').value = state.settings.apiKey;
       $<HTMLSelectElement>('#aspect').value = state.settings.aspect;
       Object.values(pickers).forEach(p => p.refresh());
