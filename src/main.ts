@@ -29,6 +29,9 @@ let abort: AbortController | null = null;
 const drafts = { ic: '', ooc: '' };
 let oocMode = false;
 let banner = '';
+let pageIdx: number | null = null; // paged view: null = latest page
+let promptFor: string | null = null; // paged view: message whose image-prompt overlay is open
+let lastPageKey = '';
 const imageBusy = new Map<string, string>(); // message id -> status text
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -46,17 +49,27 @@ function toChat(upTo: Message[]): ChatMsg[] {
   return out;
 }
 
+/** Make variant `idx` of an assistant message active, keeping each variant's image with it. */
+function switchVariant(m: Message, idx: number) {
+  (m.variantImages ??= [])[m.active] = m.image ?? null;
+  m.active = idx;
+  m.image = m.variantImages[idx] ?? undefined;
+}
+
 async function generate(target?: Message) {
   const { apiKey, chatModel } = state.settings;
   if (!apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
   banner = '';
+  pageIdx = null;
   let msg: Message;
   let history: Message[];
+  let prevActive = 0;
   if (target) {            // regenerate: add a new variant to an assistant message
     msg = target;
+    prevActive = target.active;
     history = state.messages.slice(0, state.messages.indexOf(target));
     msg.variants.push('');
-    msg.active = msg.variants.length - 1;
+    switchVariant(msg, msg.variants.length - 1);
   } else {                 // reply to the last user message
     history = [...state.messages];
     msg = { id: uid(), role: 'assistant', variants: [''], active: 0 };
@@ -67,6 +80,7 @@ async function generate(target?: Message) {
   abort = new AbortController();
   render();
   const body = () => document.querySelector(`[data-id="${msg.id}"] .body`) as HTMLElement | null;
+  let ok = true;
   try {
     await streamChat(apiKey, chatModel, toChat(history), (_d, full) => {
       msg.variants[variantIdx] = full;
@@ -74,16 +88,23 @@ async function generate(target?: Message) {
       if (el) { el.innerHTML = md(full); scrollIfNear(); }
     }, abort.signal);
   } catch (e) {
+    ok = false;
     if ((e as Error).name !== 'AbortError') banner = (e as Error).message;
   }
   // Drop an empty result (error or immediate stop) instead of keeping a blank bubble.
   if (!msg.variants[variantIdx]) {
+    ok = false;
     msg.variants.splice(variantIdx, 1);
+    msg.variantImages?.splice(variantIdx, 1);
     if (msg.variants.length === 0) state.messages.splice(state.messages.indexOf(msg), 1);
-    else msg.active = Math.min(msg.active, msg.variants.length - 1);
+    else {
+      msg.active = Math.min(prevActive, msg.variants.length - 1);
+      msg.image = msg.variantImages?.[msg.active] ?? undefined;
+    }
   }
   streamingId = null; abort = null;
   persist(); render();
+  if (ok && state.settings.autoImage) void makeImage(msg, 'draft');
 }
 
 function fitInput() {
@@ -125,15 +146,15 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
   const s = state.settings;
   if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
   banner = '';
-  m.image ??= { prompt: '' };
-  m.image.error = undefined;
+  const im = (m.image ??= { prompt: '' });
+  im.error = undefined;
   try {
-    if (mode === 'draft' || !m.image.prompt.trim()) {
+    if (mode === 'draft' || !im.prompt.trim()) {
       imageBusy.set(m.id, 'Drafting image prompt…'); render();
       const idx = state.messages.indexOf(m);
       const recent = state.messages.slice(0, idx + 1).filter(x => !x.ooc).slice(-6)
         .map(x => `${x.role === 'user' ? 'USER' : 'NARRATOR'}: ${text(x).replace(OOC_RE, '')}`).join('\n\n');
-      m.image.prompt = await completeChat(s.apiKey, s.promptModel || s.chatModel, [
+      im.prompt = await completeChat(s.apiKey, s.promptModel || s.chatModel, [
         { role: 'system', content:
           'You write prompts for a text-to-image model. Given a roleplay setting and the latest part of the story, ' +
           'write ONE vivid, concrete image prompt (max 90 words) depicting the final moment: subjects with physical ' +
@@ -153,17 +174,17 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
       persist();
     }
     imageBusy.set(m.id, 'Generating image…'); render();
-    m.image.src = await generateImage(s.apiKey, m.image.model ?? s.imageModel, m.image.prompt.trim(), s.aspect);
-  } catch (e) { m.image.error = (e as Error).message; }
+    im.src = await generateImage(s.apiKey, im.model ?? s.imageModel, im.prompt.trim(), s.aspect);
+  } catch (e) { im.error = (e as Error).message; }
   imageBusy.delete(m.id); persist(); render();
 }
 
 function scrollIfNear() {
-  const c = $('#chat');
+  const c = $(state.settings.view === 'paged' ? '#pagetext' : '#chat');
   if (c.scrollHeight - c.scrollTop - c.clientHeight < 160) c.scrollTop = c.scrollHeight;
 }
 
-function msgEl(m: Message, i: number): HTMLElement {
+function msgEl(m: Message, i: number, inPager = false): HTMLElement {
   const el = document.createElement('div');
   const isLast = i === state.messages.length - 1;
   const t = text(m);
@@ -186,7 +207,7 @@ function msgEl(m: Message, i: number): HTMLElement {
     `<button data-a="${a}" title="${title}"${dis ? ' disabled' : ''}>${label}</button>`;
   actions.innerHTML =
     btn('edit', '✎', 'Edit', busy) +
-    (m.role === 'assistant' || m.role === 'user' ? btn('img', '🖼', 'Generate companion image', busy || imageBusy.has(m.id) || !!m.image) : '') +
+    (!inPager ? btn('img', '🖼', 'Generate companion image', busy || imageBusy.has(m.id) || !!m.image) : '') +
     (isLast ? btn('regen', '↻', m.role === 'assistant' ? 'Get an alternative answer' : 'Get a reply', busy) : '') +
     btn('del', '🗑', 'Delete this message', busy);
   head.append(actions);
@@ -208,6 +229,7 @@ function msgEl(m: Message, i: number): HTMLElement {
     el.append(body);
   }
 
+  if (inPager) return el; // the paged view shows the image in its own pane
   const status = imageBusy.get(m.id);
   if (status) el.insertAdjacentHTML('beforeend', `<div class="imgstatus">${status}</div>`);
   if (m.image) {
@@ -269,12 +291,161 @@ function updateComposer() {
   input.placeholder = oocMode ? 'Out-of-character note to the narrator…' : 'Write your message…';
 }
 
+interface Page { users: Message[]; reply?: Message }
+
+/** A page is a turn: the user message(s) you sent plus the narrator's reply to them. */
+function pages(): Page[] {
+  const out: Page[] = [];
+  let cur: Page | undefined;
+  for (const m of state.messages) {
+    if (!cur || cur.reply) { cur = { users: [] }; out.push(cur); }
+    if (m.role === 'user') cur.users.push(m); else cur.reply = m;
+  }
+  return out;
+}
+const pageIndex = (n: number) => (n === 0 ? 0 : pageIdx === null ? n - 1 : Math.min(pageIdx, n - 1));
+
+function goto(i: number) {
+  const n = pages().length;
+  i = Math.max(0, Math.min(n - 1, i));
+  pageIdx = i === n - 1 ? null : i;
+  editingId = null; promptFor = null;
+  render();
+}
+
+function imagePane(m: Message): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'imgpane'; el.dataset.id = m.id;
+  const im = m.image;
+  const status = imageBusy.get(m.id);
+  const working = !!status || streamingId === m.id;
+
+  const stage = document.createElement('div');
+  stage.className = 'stage';
+  if (im?.src) {
+    const img = document.createElement('img');
+    img.src = im.src; img.alt = im.prompt;
+    stage.append(img);
+  } else {
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = streamingId === m.id
+      ? (state.settings.autoImage ? 'The photo follows the reply…' : '')
+      : 'No image yet';
+    stage.append(hint);
+  }
+  if (status) stage.insertAdjacentHTML('beforeend', `<div class="status">${status}</div>`);
+  el.append(stage);
+  if (im?.error) el.insertAdjacentHTML('beforeend', '<div class="imgerror"></div>');
+  if (im?.error) el.querySelector('.imgerror')!.textContent = im.error;
+
+  const sel = document.createElement('select');
+  sel.className = 'imgmodel'; sel.disabled = working;
+  const cur = im?.model ?? state.settings.imageModel;
+  const opts = IMAGE_MODELS.map(x => `<option value="${x.id}">${modelLabel(x)}</option>`);
+  if (!IMAGE_MODELS.some(x => x.id === cur)) opts.unshift(`<option value="${cur}">${cur} (custom)</option>`);
+  sel.innerHTML = opts.join('');
+  sel.value = cur;
+  sel.addEventListener('change', () => {
+    (m.image ??= { prompt: '' }).model = sel.value;
+    state.settings.imageModel = sel.value; // remembered as the new default
+    pickers.imageModel?.refresh();
+    persist();
+  });
+  const row = document.createElement('div');
+  row.className = 'editrow';
+  const hasPrompt = !!im?.prompt.trim();
+  const b = (a: string, label: string, cls = '', dis = working) =>
+    `<button data-a="${a}" class="${cls}"${dis ? ' disabled' : ''}>${label}</button>`;
+  row.innerHTML =
+    b(hasPrompt ? 'imgrender' : 'img', im?.src ? 'Regenerate' : im?.error ? 'Retry' : 'Generate image', 'primary') +
+    b('prompt', 'Prompt…', '', false) + (im ? b('rmimg', 'Remove') : '');
+  el.append(sel, row);
+  return el;
+}
+
+function promptOverlay(m: Message): HTMLElement {
+  const im = (m.image ??= { prompt: '' });
+  const working = imageBusy.has(m.id);
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.innerHTML = `<div class="card" data-id="${m.id}">
+    <label>Image prompt</label>
+    <textarea></textarea>
+    <div class="editrow">
+      <button data-a="imgrender" class="primary"${working ? ' disabled' : ''}>Generate image</button>
+      <button data-a="imgdraft"${working ? ' disabled' : ''}>Redraft with AI</button>
+      <button data-a="closeprompt">Close</button>
+    </div>
+    ${working ? `<div class="imgstatus">${imageBusy.get(m.id)}</div>` : ''}
+  </div>`;
+  const ta = ov.querySelector('textarea') as HTMLTextAreaElement;
+  ta.value = im.prompt; ta.disabled = working;
+  ta.placeholder = 'Prompt for the image model… (or use Redraft)';
+  ta.addEventListener('input', () => { im.prompt = ta.value; persist(); });
+  ov.addEventListener('click', e => { if (e.target === ov) { promptFor = null; render(); } });
+  return ov;
+}
+
+function renderPager() {
+  const ps = pages();
+  const n = ps.length;
+  const idx = pageIndex(n);
+  const page = ps[idx];
+  const text = $('#pagetext');
+  const key = page ? (page.users[0] ?? page.reply!).id : '';
+  const prevTop = text.scrollTop;
+  const sameAsBefore = key === lastPageKey;
+  lastPageKey = key;
+
+  $('#pageno').textContent = n ? `${idx + 1} / ${n}` : '–';
+  ($('#p-first') as HTMLButtonElement).disabled = ($('#p-prev') as HTMLButtonElement).disabled = idx <= 0;
+  ($('#p-next') as HTMLButtonElement).disabled = ($('#p-last') as HTMLButtonElement).disabled = idx >= n - 1;
+
+  const pane = $('#pageimg');
+  if (!page) {
+    text.innerHTML = '<p class="empty">Set the scene in the sidebar, then write your first message.</p>';
+    pane.replaceChildren();
+    return;
+  }
+  const users = document.createElement('div');
+  users.className = 'page-users';
+  users.append(...page.users.map(m => msgEl(m, state.messages.indexOf(m), true)));
+  text.replaceChildren(...(page.users.length ? [users] : []),
+    ...(page.reply ? [msgEl(page.reply, state.messages.indexOf(page.reply), true)] : []));
+  text.scrollTop = sameAsBefore ? prevTop : 0;
+
+  if (page.reply) {
+    pane.replaceChildren(imagePane(page.reply));
+    if (promptFor === page.reply.id) pane.append(promptOverlay(page.reply));
+  } else {
+    pane.innerHTML = '<div class="stage"><div class="hint">The photo appears with the narrator\'s reply</div></div>';
+  }
+}
+
 function render() {
-  const chat = $('#chat');
-  const keep = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160;
-  chat.replaceChildren(...state.messages.map(msgEl));
-  if (!state.messages.length) chat.innerHTML = '<p class="empty">Set the scene in the sidebar, then write your first message.</p>';
-  if (keep) chat.scrollTop = chat.scrollHeight;
+  const view = state.settings.view;
+  const paged = view === 'paged';
+  $('#chat').hidden = paged;
+  $('#pager').hidden = !paged;
+  $('#pagernav').hidden = !paged;
+  $('#v-paged').classList.toggle('on', paged);
+  $('#v-chat').classList.toggle('on', !paged);
+  ($('#autoImage') as HTMLInputElement).checked = state.settings.autoImage;
+
+  if (paged) {
+    renderPager();
+    // The composer belongs to the latest page; hide it while reading back.
+    const n = pages().length;
+    $('#composer').hidden = n > 0 && pageIndex(n) < n - 1;
+  } else {
+    const chat = $('#chat');
+    const keep = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160;
+    chat.replaceChildren(...state.messages.map((m, i) => msgEl(m, i)));
+    if (!state.messages.length) chat.innerHTML = '<p class="empty">Set the scene in the sidebar, then write your first message.</p>';
+    if (keep) chat.scrollTop = chat.scrollHeight;
+    $('#composer').hidden = false;
+  }
   const b = $('#banner');
   b.textContent = banner; b.hidden = !banner;
   $('#send').textContent = streamingId ? 'Stop' : 'Send';
@@ -284,7 +455,7 @@ function render() {
 function onChatClick(e: MouseEvent) {
   const b = (e.target as HTMLElement).closest('button[data-a]') as HTMLElement | null;
   if (!b) return;
-  const el = b.closest('.msg') as HTMLElement;
+  const el = b.closest('[data-id]') as HTMLElement;
   const m = state.messages.find(x => x.id === el.dataset.id)!;
   switch (b.dataset.a) {
     case 'edit': editingId = m.id; break;
@@ -294,16 +465,18 @@ function onChatClick(e: MouseEvent) {
       if (v) m.variants[m.active] = v;
       editingId = null; persist(); break;
     }
-    case 'prev': m.active = Math.max(0, m.active - 1); persist(); break;
-    case 'next': m.active = Math.min(m.variants.length - 1, m.active + 1); persist(); break;
+    case 'prev': switchVariant(m, Math.max(0, m.active - 1)); persist(); break;
+    case 'next': switchVariant(m, Math.min(m.variants.length - 1, m.active + 1)); persist(); break;
     case 'del':
       if (!confirm('Delete this message?')) return;
       state.messages.splice(state.messages.indexOf(m), 1); persist(); break;
     case 'regen': return void (m.role === 'assistant' ? generate(m) : generate());
     case 'img': return void makeImage(m, 'draft');
-    case 'imgdraft': return void makeImage(m, 'draft');
-    case 'imgrender': return void makeImage(m, 'render');
-    case 'rmimg': delete m.image; persist(); break;
+    case 'imgdraft': return void makeImage(m, 'draft'); // overlay stays open to show the new prompt
+    case 'imgrender': promptFor = null; return void makeImage(m, 'render');
+    case 'rmimg': delete m.image; promptFor = null; persist(); break;
+    case 'prompt': m.image ??= { prompt: '' }; promptFor = m.id; break;
+    case 'closeprompt': promptFor = null; break;
   }
   render();
 }
@@ -372,7 +545,17 @@ function buildUI() {
   </aside>
   <main>
     <div id="banner" hidden></div>
+    <div id="topbar">
+      <div class="seg"><button id="v-paged" title="One turn per page, with a stable photo">Paged</button><button id="v-chat" title="Scrolling conversation">Chat</button></div>
+      <div id="pagernav">
+        <button id="p-first" title="First page">«</button><button id="p-prev" title="Previous page (←)">‹</button>
+        <span id="pageno"></span>
+        <button id="p-next" title="Next page (→)">›</button><button id="p-last" title="Latest page">»</button>
+      </div>
+      <label class="auto" title="Generate a companion image after every reply"><input type="checkbox" id="autoImage" /> Auto photo</label>
+    </div>
     <div id="chat"></div>
+    <div id="pager"><div id="pagetext"></div><div id="pageimg"></div></div>
     <form id="composer">
       <div class="compose-main">
         <div class="tabs" role="tablist">
@@ -404,6 +587,22 @@ function buildUI() {
   if (!s.apiKey) ($('#settings') as HTMLDetailsElement).open = true;
 
   $('#chat').addEventListener('click', onChatClick);
+  $('#pager').addEventListener('click', onChatClick);
+  const setView = (v: 'paged' | 'chat') => { state.settings.view = v; persist(); render(); };
+  $('#v-paged').addEventListener('click', () => setView('paged'));
+  $('#v-chat').addEventListener('click', () => setView('chat'));
+  $('#autoImage').addEventListener('change', e => { state.settings.autoImage = (e.target as HTMLInputElement).checked; persist(); });
+  const nav = () => pageIndex(pages().length);
+  $('#p-first').addEventListener('click', () => goto(0));
+  $('#p-prev').addEventListener('click', () => goto(nav() - 1));
+  $('#p-next').addEventListener('click', () => goto(nav() + 1));
+  $('#p-last').addEventListener('click', () => goto(Infinity));
+  document.addEventListener('keydown', e => {
+    if (state.settings.view !== 'paged' || e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((e.target as HTMLElement).closest('textarea, input, select')) return;
+    if (e.key === 'ArrowLeft') goto(nav() - 1);
+    if (e.key === 'ArrowRight') goto(nav() + 1);
+  });
   $('#tab-ic').addEventListener('click', () => setMode(false));
   $('#tab-ooc').addEventListener('click', () => setMode(true));
   $('#composer').addEventListener('submit', e => {
@@ -453,7 +652,7 @@ function buildUI() {
       }
       // Copy only known string fields so a malformed file can't inject anything else.
       for (const k of Object.keys(state.settings) as (keyof typeof state.settings)[]) {
-        if (typeof j.settings[k] === 'string') state.settings[k] = j.settings[k];
+        if (typeof j.settings[k] === typeof state.settings[k]) (state.settings as unknown as Record<string, unknown>)[k] = j.settings[k];
       }
       // Version-1 settings files kept the system prompt at the top level.
       if (typeof j.settings.systemPrompt !== 'string' && typeof j.system === 'string') {

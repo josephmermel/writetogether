@@ -1,12 +1,15 @@
 import { DEFAULT_CHAT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_PROMPT_MODEL } from './models';
 
+export interface MsgImage { src?: string; prompt: string; error?: string; model?: string }
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   ooc?: boolean;            // user message sent as [OOC: ...]
   variants: string[];       // alternative answers (regenerate keeps the old ones)
   active: number;
-  image?: { src?: string; prompt: string; error?: string; model?: string };
+  image?: MsgImage;                    // image for the active variant
+  variantImages?: (MsgImage | null)[]; // images of the other variants, indexed like `variants`
 }
 
 export interface Settings {
@@ -16,6 +19,8 @@ export interface Settings {
   imageModel: string;
   aspect: string;
   systemPrompt: string;     // part of settings (saved with the settings file)
+  autoImage: boolean;       // generate a companion image automatically after each reply
+  view: 'paged' | 'chat';
 }
 
 export interface State { scene: string; messages: Message[]; settings: Settings }  // scene is saved with the chat
@@ -36,6 +41,8 @@ export const defaults: State = {
     imageModel: DEFAULT_IMAGE_MODEL,
     aspect: '3:4',
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    autoImage: false,
+    view: 'paged',
   },
 };
 
