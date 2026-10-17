@@ -75,3 +75,5 @@ figure details { font-size: 13px; color: var(--muted); margin-top: 4px; }
 .imgerror { background: #5a1f24; color: #ffd7d9; border-radius: 8px; padding: 6px 10px; font-size: 13px; margin-bottom: 6px; }
 .dialogue { color: var(--dialogue); font-weight: 600; }
 .imgmodel { margin-top: 6px; font-size: 14px; }
+.picker { display: flex; flex-direction: column; gap: 4px; }
+.picker input[hidden] { display: none; }

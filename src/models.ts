@@ -19,3 +19,15 @@ export const IMAGE_MODELS: ImageModel[] = [
 
 export const modelInfo = (id: string) => IMAGE_MODELS.find(m => m.id === id);
 export const modelLabel = (m: ImageModel) => `${m.label} — $${m.price.toFixed(3)} · ${m.speed}`;
+
+export interface TextModel { id: string; label: string }
+
+export const TEXT_MODELS: TextModel[] = [
+  { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash' },
+  { id: '~deepseek/deepseek-flash-latest', label: 'DeepSeek Flash (latest)' },
+];
+
+// Defaults for new installs. Saved settings in the browser take precedence.
+export const DEFAULT_CHAT_MODEL = TEXT_MODELS[0].id;
+export const DEFAULT_PROMPT_MODEL = ''; // '' = same as the chat model
+export const DEFAULT_IMAGE_MODEL = IMAGE_MODELS[0].id;

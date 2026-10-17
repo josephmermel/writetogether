@@ -1,3 +1,5 @@
+import { DEFAULT_CHAT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_PROMPT_MODEL } from './models';
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -22,9 +24,9 @@ export const defaults: State = {
   messages: [],
   settings: {
     apiKey: '',
-    chatModel: 'anthropic/claude-sonnet-4.5',
-    promptModel: '',
-    imageModel: 'black-forest-labs/flux.2-klein-4b',
+    chatModel: DEFAULT_CHAT_MODEL,
+    promptModel: DEFAULT_PROMPT_MODEL,
+    imageModel: DEFAULT_IMAGE_MODEL,
     aspect: '3:4',
   },
 };

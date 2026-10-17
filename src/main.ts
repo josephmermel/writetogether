@@ -2,7 +2,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import './style.css';
 import { streamChat, completeChat, generateImage, type ChatMsg } from './api';
-import { IMAGE_MODELS, modelLabel } from './models';
+import { IMAGE_MODELS, TEXT_MODELS, modelLabel } from './models';
 import { load, save, uid, text, type Message, type State } from './store';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -223,7 +223,7 @@ function msgEl(m: Message, i: number): HTMLElement {
     sel.value = cur;
     sel.addEventListener('change', () => {
       im.model = sel.value; state.settings.imageModel = sel.value; // remembered as the new default
-      $<HTMLInputElement>('#imageModel').value = sel.value;
+      pickers.imageModel?.refresh();
       persist();
     });
     const row = document.createElement('div');
@@ -279,6 +279,35 @@ function onChatClick(e: MouseEvent) {
   render();
 }
 
+const pickers: Record<string, { refresh: () => void }> = {};
+
+/** Dropdown of known models plus "Custom…" that reveals a text box for pasting any OpenRouter slug. */
+function modelPicker(
+  id: string, options: { value: string; label: string }[], get: () => string, set: (v: string) => void,
+) {
+  const root = $(`#${id}`);
+  const sel = document.createElement('select');
+  const txt = document.createElement('input');
+  txt.placeholder = 'vendor/model-name'; txt.spellcheck = false;
+  sel.innerHTML = options.map(o => `<option value="${o.value}">${o.label}</option>`).join('') +
+    '<option value="__custom">Custom…</option>';
+  root.append(sel, txt);
+  const refresh = () => {
+    const v = get();
+    const known = options.some(o => o.value === v);
+    sel.value = known ? v : '__custom';
+    txt.hidden = known;
+    if (!known) txt.value = v;
+  };
+  sel.addEventListener('change', () => {
+    if (sel.value === '__custom') { txt.hidden = false; txt.value = get() || ''; txt.focus(); return; }
+    set(sel.value); persist(); refresh();
+  });
+  txt.addEventListener('input', () => { set(txt.value.trim()); persist(); });
+  refresh();
+  return { refresh };
+}
+
 function buildUI() {
   $('#app').innerHTML = `
   <aside id="side">
@@ -290,11 +319,11 @@ function buildUI() {
       <label>OpenRouter API key</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-or-…" />
       <label>Chat model</label>
-      <input id="chatModel" />
+      <div id="chatModel" class="picker"></div>
       <label>Image-prompt model <small>(blank = chat model)</small></label>
-      <input id="promptModel" />
+      <div id="promptModel" class="picker"></div>
       <label>Image model</label>
-      <input id="imageModel" />
+      <div id="imageModel" class="picker"></div>
       <label>Image aspect ratio</label>
       <select id="aspect"><option>1:1</option><option>3:4</option><option>4:3</option><option>16:9</option><option>9:16</option></select>
       <p class="hint">Your key is stored only in this browser and sent only to openrouter.ai.</p>
@@ -323,9 +352,12 @@ function buildUI() {
   const s = state.settings;
   bind('system', () => state.system, v => state.system = v);
   bind('apiKey', () => s.apiKey, v => s.apiKey = v.trim());
-  bind('chatModel', () => s.chatModel, v => s.chatModel = v.trim());
-  bind('promptModel', () => s.promptModel, v => s.promptModel = v.trim());
-  bind('imageModel', () => s.imageModel, v => s.imageModel = v.trim());
+  const textOpts = TEXT_MODELS.map(m => ({ value: m.id, label: m.label }));
+  pickers.chatModel = modelPicker('chatModel', textOpts, () => s.chatModel, v => s.chatModel = v);
+  pickers.promptModel = modelPicker('promptModel', [{ value: '', label: 'Same as chat model' }, ...textOpts],
+    () => s.promptModel, v => s.promptModel = v);
+  pickers.imageModel = modelPicker('imageModel', IMAGE_MODELS.map(m => ({ value: m.id, label: modelLabel(m) })),
+    () => s.imageModel, v => s.imageModel = v);
   bind('aspect', () => s.aspect, v => s.aspect = v);
   if (!s.apiKey) ($('#settings') as HTMLDetailsElement).open = true;
 
