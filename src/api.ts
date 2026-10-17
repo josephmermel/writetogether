@@ -67,13 +67,16 @@ export async function completeChat(key: string, model: string, messages: ChatMsg
 }
 
 /** Text-to-image via OpenRouter's /images endpoint. Returns a data: or http URL. */
-export async function generateImage(key: string, model: string, prompt: string, aspect: string): Promise<string> {
+export async function generateImage(
+  key: string, model: string, prompt: string, aspect: string, refs: string[] = [],
+): Promise<string> {
   const prov = modelInfo(model)?.prov;
   const res = await fetch(`${BASE}/images`, {
     method: 'POST', headers: headers(key),
     body: JSON.stringify({
       model, prompt, n: 1, aspect_ratio: aspect,
       ...(prov && { provider: { options: { [prov[0]]: prov[1] } } }),
+      ...(refs.length && { input_references: refs.map(url => ({ type: 'image_url', image_url: { url } })) }),
     }),
   });
   if (!res.ok) return fail(res);

@@ -1,6 +1,9 @@
 import { DEFAULT_CHAT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_PROMPT_MODEL } from './models';
 
-export interface MsgImage { src?: string; prompt: string; error?: string; model?: string }
+export type Who = 'you' | 'them'; // you = the user's character, them = the narrator's character
+export interface Character { name: string; description: string; image?: string; avatar?: string }
+
+export interface MsgImage { src?: string; prompt: string; error?: string; model?: string; refs?: Who[] }
 
 export interface Message {
   id: string;
@@ -23,7 +26,7 @@ export interface Settings {
   view: 'paged' | 'chat';
 }
 
-export interface State { scene: string; messages: Message[]; settings: Settings }  // scene is saved with the chat
+export interface State { scene: string; cast: Record<Who, Character>; messages: Message[]; settings: Settings }  // scene is saved with the chat
 
 export const DEFAULT_SYSTEM_PROMPT =
   'You are the narrator and game master of an interactive, turn-based roleplay with the user. Stay in the ' +
@@ -33,6 +36,7 @@ export const DEFAULT_SYSTEM_PROMPT =
 
 export const defaults: State = {
   scene: '',
+  cast: { you: { name: '', description: '' }, them: { name: '', description: '' } },
   messages: [],
   settings: {
     apiKey: '',
@@ -66,7 +70,8 @@ export async function load(): Promise<State> {
       const old = v as State & { system?: string };
       const scene = old.scene ?? old.system ?? '';
       delete old.system;
-      return { ...defaults, ...old, scene, settings: { ...defaults.settings, ...old.settings } };
+      const cast = { you: { ...defaults.cast.you, ...old.cast?.you }, them: { ...defaults.cast.them, ...old.cast?.them } };
+      return { ...defaults, ...old, scene, cast, settings: { ...defaults.settings, ...old.settings } };
     }
   } catch { /* fall through */ }
   return structuredClone(defaults);

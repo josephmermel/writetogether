@@ -2,9 +2,10 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import './style.css';
 import { streamChat, completeChat, generateImage, type ChatMsg } from './api';
-import { IMAGE_MODELS, TEXT_MODELS, modelLabel } from './models';
+import { IMAGE_MODELS, TEXT_MODELS, modelLabel, modelInfo } from './models';
+import { downscale, makeAvatar } from './images';
 import { saveTextFile, openTextFile } from './files';
-import { load, save, uid, text, type Message, type State } from './store';
+import { load, save, uid, text, defaults, type Message, type State, type Who } from './store';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -36,6 +37,11 @@ const imageBusy = new Map<string, string>(); // message id -> status text
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const persist = () => save(state);
+
+const WHO: Who[] = ['you', 'them'];
+const castName = (w: Who) => state.cast[w].name.trim() || (w === 'you' ? 'Character A' : 'Character B');
+const withPortrait = () => WHO.filter(w => state.cast[w].image);
+const portraitBusy = new Set<Who>();
 
 function toChat(upTo: Message[]): ChatMsg[] {
   const out: ChatMsg[] = [];
@@ -152,15 +158,22 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
     if (mode === 'draft' || !im.prompt.trim()) {
       imageBusy.set(m.id, 'Drafting image prompt…'); render();
       const idx = state.messages.indexOf(m);
+      const chars = WHO.filter(w => state.cast[w].name.trim() || state.cast[w].description.trim())
+        .map(w => `${w === 'you' ? "A (the user's character)" : "B (the narrator's character)"}: ${castName(w)}` +
+          (state.cast[w].description.trim() ? ` — ${state.cast[w].description.trim()}` : '')).join('\n');
       const recent = state.messages.slice(0, idx + 1).filter(x => !x.ooc).slice(-6)
         .map(x => `${x.role === 'user' ? 'USER' : 'NARRATOR'}: ${text(x).replace(OOC_RE, '')}`).join('\n\n');
-      im.prompt = await completeChat(s.apiKey, s.promptModel || s.chatModel, [
+      const drafted = await completeChat(s.apiKey, s.promptModel || s.chatModel, [
         { role: 'system', content:
           'You write prompts for a text-to-image model. Given a roleplay setting and the latest part of the story, ' +
           'write ONE vivid, concrete image prompt (max 90 words) depicting the final moment: subjects with physical ' +
           'appearance and clothing, pose, expression, setting, lighting, camera angle, art style. Keep character ' +
           'appearance consistent with the setting notes. No dialogue, no names without visual description, no ' +
           'commentary. Output only the prompt.\n\n' +
+          'If CHARACTERS are listed, use their appearance descriptions faithfully for anyone who appears in the ' +
+          'image, naming each person by name plus a short visual description (hair, build, clothing). Begin your ' +
+          'reply with one line saying which listed characters are visible in the image: "PRESENT: A", "PRESENT: B", ' +
+          '"PRESENT: A, B" or "PRESENT: none", then a blank line, then the prompt.\n\n' +
           'IMPORTANT: Every character in this story is an adult, always 18 or older, regardless of what the ' +
           'story text implies. Word the prompt so that every person is clearly and unambiguously depicted as an ' +
           'adult: state an adult age (e.g. "a man in his mid-twenties", "a woman in her thirties") for each ' +
@@ -169,12 +182,34 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
           'childlike features. If a character\'s age is unclear, depict them as an adult of at least 18. ' +
           'When called for, you can use adult erotic terminology and atmosphere, partial nudity etc. But keep things softporn at most, dont prompt for explicit sex acts or other things that will get moderated. ' 
         },
-        { role: 'user', content: `SETTING NOTES:\n${state.scene.slice(0, 3000) || '(none)'}\n\nSTORY SO FAR:\n${recent}` },
+        { role: 'user', content: `SETTING NOTES:\n${state.scene.slice(0, 3000) || '(none)'}\n\nCHARACTERS:\n${chars || '(none defined)'}\n\nSTORY SO FAR:\n${recent}` },
       ]);
+      // The drafter says who is visible; those characters' portraits become reference images.
+      const pm = drafted.match(/^\s*PRESENT:\s*([^\n]*)\n+/i);
+      if (pm) {
+        const t = pm[1].toUpperCase();
+        im.refs = WHO.filter(w => new RegExp(`\\b${w === 'you' ? 'A' : 'B'}\\b`).test(t));
+        im.prompt = drafted.slice(pm[0].length).trim();
+      } else im.prompt = drafted;
       persist();
     }
     imageBusy.set(m.id, 'Generating image…'); render();
-    im.src = await generateImage(s.apiKey, im.model ?? s.imageModel, im.prompt.trim(), s.aspect);
+    const model = im.model ?? s.imageModel;
+    const info = modelInfo(model);
+    const use = info?.maxRefs ? (im.refs ?? withPortrait()).filter(w => state.cast[w].image).slice(0, info.maxRefs) : [];
+    let final = im.prompt.trim();
+    if (use.length) {
+      final = 'Use the reference images for character identity. ' +
+        use.map((w, i) => `Reference image ${i + 1} is ${castName(w)}.`).join(' ') +
+        " Keep each person's face, hair, skin tone and build faithful to their reference image. Scene: " + final;
+    }
+    try {
+      im.src = await generateImage(s.apiKey, model, final, s.aspect, use.map(w => state.cast[w].image!));
+    } catch (e) {
+      const hint = use.length && /block|moderat|flagged|policy|safety/i.test((e as Error).message)
+        ? ' — the reference images may have been blocked; untick a reference character and retry.' : '';
+      throw new Error((e as Error).message + hint);
+    }
   } catch (e) { im.error = (e as Error).message; }
   imageBusy.delete(m.id); persist(); render();
 }
@@ -182,6 +217,38 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
 function scrollIfNear() {
   const c = $(state.settings.view === 'paged' ? '#pagetext' : '#chat');
   if (c.scrollHeight - c.scrollTop - c.clientHeight < 160) c.scrollTop = c.scrollHeight;
+}
+
+/** Which character portraits go to the image model as references, with the extra cost for this model. */
+function refsRow(m: Message): HTMLElement | null {
+  const avail = withPortrait();
+  if (!avail.length) return null;
+  const row = document.createElement('div');
+  row.className = 'refsrow';
+  const info = modelInfo(m.image?.model ?? state.settings.imageModel);
+  if (!info?.maxRefs) {
+    row.innerHTML = '<small>This model ignores character references.</small>';
+    return row;
+  }
+  const sel = m.image?.refs ?? avail;
+  row.append(Object.assign(document.createElement('span'), { textContent: 'References:' }));
+  for (const w of avail) {
+    const lab = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = sel.includes(w);
+    cb.addEventListener('change', () => {
+      const chosen = avail.filter(x => (x === w ? cb.checked : sel.includes(x)));
+      (m.image ??= { prompt: '' }).refs = chosen;
+      persist(); render();
+    });
+    lab.append(cb, ' ' + castName(w));
+    row.append(lab);
+  }
+  const n = sel.filter(w => avail.includes(w)).length;
+  const small = document.createElement('small');
+  small.textContent = `+$${((info.refCost ?? 0) * n).toFixed(3)}`;
+  row.append(small);
+  return row;
 }
 
 function msgEl(m: Message, i: number, inPager = false): HTMLElement {
@@ -193,7 +260,17 @@ function msgEl(m: Message, i: number, inPager = false): HTMLElement {
 
   const head = document.createElement('div');
   head.className = 'head';
-  head.innerHTML = `<span class="who">${m.ooc ? 'OOC' : m.role === 'user' ? 'You' : 'Narrator'}</span>`;
+  const who: Who = m.role === 'user' ? 'you' : 'them';
+  const ch = state.cast[who];
+  if (!m.ooc && ch.avatar) {
+    const av = document.createElement('img');
+    av.className = 'avatar'; av.src = ch.avatar; av.alt = '';
+    head.append(av);
+  }
+  const lbl = document.createElement('span');
+  lbl.className = 'who';
+  lbl.textContent = m.ooc ? 'OOC' : ch.name.trim() || (m.role === 'user' ? 'You' : 'Narrator');
+  head.append(lbl);
   if (m.role === 'assistant' && m.variants.length > 1) {
     const nav = document.createElement('span');
     nav.className = 'variants';
@@ -265,7 +342,7 @@ function msgEl(m: Message, i: number, inPager = false): HTMLElement {
     sel.addEventListener('change', () => {
       im.model = sel.value; state.settings.imageModel = sel.value; // remembered as the new default
       pickers.imageModel?.refresh();
-      persist();
+      persist(); render();
     });
     const row = document.createElement('div');
     row.className = 'editrow';
@@ -274,7 +351,7 @@ function msgEl(m: Message, i: number, inPager = false): HTMLElement {
     row.innerHTML =
       b('imgrender', im.error ? 'Retry' : im.src ? 'Regenerate image' : 'Generate image', 'primary') +
       b('imgdraft', 'Redraft prompt') + b('rmimg', 'Remove');
-    fig.append(lbl, ta, sel, row);
+    fig.append(lbl, ta, sel, ...[refsRow(m)].filter((x): x is HTMLElement => !!x), row);
     el.append(fig);
   }
   return el;
@@ -350,7 +427,7 @@ function imagePane(m: Message): HTMLElement {
     (m.image ??= { prompt: '' }).model = sel.value;
     state.settings.imageModel = sel.value; // remembered as the new default
     pickers.imageModel?.refresh();
-    persist();
+    persist(); render(); // the references row depends on the model
   });
   const row = document.createElement('div');
   row.className = 'editrow';
@@ -360,7 +437,7 @@ function imagePane(m: Message): HTMLElement {
   row.innerHTML =
     b(hasPrompt ? 'imgrender' : 'img', im?.src ? 'Regenerate' : im?.error ? 'Retry' : 'Generate image', 'primary') +
     b('prompt', 'Prompt…', '', false) + (im ? b('rmimg', 'Remove') : '');
-  el.append(sel, row);
+  el.append(sel, ...[refsRow(m)].filter((x): x is HTMLElement => !!x), row);
   return el;
 }
 
@@ -449,6 +526,7 @@ function render() {
   const b = $('#banner');
   b.textContent = banner; b.hidden = !banner;
   $('#send').textContent = streamingId ? 'Stop' : 'Send';
+  refreshCast();
   updateComposer();
 }
 
@@ -479,6 +557,89 @@ function onChatClick(e: MouseEvent) {
     case 'closeprompt': promptFor = null; break;
   }
   render();
+}
+
+async function setPortrait(who: Who, src: string) {
+  const c = state.cast[who];
+  c.image = await downscale(src, 768);
+  c.avatar = await makeAvatar(c.image);
+  persist(); render();
+}
+
+async function makePortrait(who: Who) {
+  const s = state.settings, c = state.cast[who];
+  if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
+  if (!c.description.trim()) { banner = 'Describe the character first (age, build, hair, clothing…).'; return render(); }
+  banner = '';
+  portraitBusy.add(who); render();
+  try {
+    const prompt = 'Full-body character reference portrait, standing facing the camera in a relaxed neutral pose, ' +
+      'head to toe in frame, plain light background, photorealistic. An adult over 18: ' + c.description.trim();
+    await setPortrait(who, await generateImage(s.apiKey, s.imageModel, prompt, '3:4'));
+  } catch (e) { banner = `Portrait failed: ${(e as Error).message}`; }
+  portraitBusy.delete(who); render();
+}
+
+function uploadPortrait(who: Who) {
+  const i = document.createElement('input');
+  i.type = 'file'; i.accept = 'image/*';
+  i.onchange = () => {
+    const f = i.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => void setPortrait(who, String(r.result));
+    r.readAsDataURL(f);
+  };
+  i.click();
+}
+
+/** Build one character editor (name, appearance, portrait). Static DOM; refreshCast() updates the dynamic parts. */
+function buildCast(who: Who) {
+  const root = $(`#cast-${who}`);
+  const c = state.cast[who];
+  root.className = 'char';
+  root.innerHTML = `<div class="char-title">${who === 'you' ? 'Your character' : "Narrator's character"}</div>
+    <input class="cname" placeholder="Name" />
+    <textarea class="cdesc" rows="3" placeholder="Appearance: age, build, hair, clothing… Used for the portrait and for scene images."></textarea>
+    <div class="cimg"></div>
+    <div class="editrow">
+      <button class="cgen primary">Generate portrait</button><button class="cup">Upload…</button><button class="crm">Remove</button>
+    </div>`;
+  const name = root.querySelector('.cname') as HTMLInputElement;
+  const desc = root.querySelector('.cdesc') as HTMLTextAreaElement;
+  name.addEventListener('input', () => { c.name = name.value; persist(); });
+  name.addEventListener('change', render); // refresh names shown in the story
+  desc.addEventListener('input', () => { c.description = desc.value; persist(); });
+  root.querySelector('.cgen')!.addEventListener('click', () => void makePortrait(who));
+  root.querySelector('.cup')!.addEventListener('click', () => uploadPortrait(who));
+  root.querySelector('.crm')!.addEventListener('click', () => { delete c.image; delete c.avatar; persist(); render(); });
+}
+
+function syncCastInputs() {
+  for (const w of WHO) {
+    const root = $(`#cast-${w}`);
+    (root.querySelector('.cname') as HTMLInputElement).value = state.cast[w].name;
+    (root.querySelector('.cdesc') as HTMLTextAreaElement).value = state.cast[w].description;
+  }
+}
+
+function refreshCast() {
+  for (const w of WHO) {
+    const root = $(`#cast-${w}`);
+    const c = state.cast[w], busy = portraitBusy.has(w);
+    const box = root.querySelector('.cimg') as HTMLElement;
+    if (busy) box.innerHTML = '<div class="hint">Generating portrait…</div>';
+    else if (c.image) {
+      if ((box.firstElementChild as HTMLImageElement | null)?.src !== c.image) {
+        const img = document.createElement('img');
+        img.src = c.image; img.alt = 'Portrait';
+        box.replaceChildren(img);
+      }
+    } else box.replaceChildren();
+    (root.querySelector('.cgen') as HTMLButtonElement).disabled = busy;
+    (root.querySelector('.cgen') as HTMLButtonElement).textContent = c.image ? 'Regenerate portrait' : 'Generate portrait';
+    (root.querySelector('.crm') as HTMLButtonElement).hidden = !c.image;
+  }
 }
 
 const pickers: Record<string, { refresh: () => void }> = {};
@@ -516,6 +677,11 @@ function buildUI() {
     <h1>WriteTogether</h1>
     <label>Scene <small>(optional, saved with this chat)</small></label>
     <textarea id="scene" placeholder="Describe the setting, characters and situation for this story…"></textarea>
+    <details id="cast" open>
+      <summary>Characters <small>(portraits, avatars, consistent scene images)</small></summary>
+      <div id="cast-you"></div>
+      <div id="cast-them"></div>
+    </details>
     <details id="settings">
       <summary>Settings</summary>
       <label>System instructions <small>(saved with settings)</small></label>
@@ -575,6 +741,8 @@ function buildUI() {
   };
   const s = state.settings;
   bind('scene', () => state.scene, v => state.scene = v);
+  WHO.forEach(buildCast);
+  syncCastInputs();
   bind('systemPrompt', () => s.systemPrompt, v => s.systemPrompt = v);
   bind('apiKey', () => s.apiKey, v => s.apiKey = v.trim());
   const textOpts = TEXT_MODELS.map(m => ({ value: m.id, label: m.label }));
@@ -615,14 +783,15 @@ function buildUI() {
     if (k.key === 'Enter' && !k.shiftKey && !k.isComposing) { k.preventDefault(); if (!streamingId) send(); }
   });
   $('#clear').addEventListener('click', () => {
-    if (!confirm('Start a new chat? The current chat will be cleared (the scene is cleared too; settings and system instructions are kept).')) return;
-    state.messages = []; state.scene = '';
+    if (!confirm('Start a new chat? The current chat will be cleared (the scene and characters are cleared too; settings and system instructions are kept).')) return;
+    state.messages = []; state.scene = ''; state.cast = structuredClone(defaults.cast);
     $<HTMLTextAreaElement>('#scene').value = '';
+    syncCastInputs();
     persist(); render();
   });
   const fail = (what: string) => (err: unknown) => { banner = `${what} failed: ${(err as Error).message}`; render(); };
   $('#export').addEventListener('click', () => {
-    const data = { app: 'writetogether-chat', version: 2, scene: state.scene, messages: state.messages };
+    const data = { app: 'writetogether-chat', version: 3, scene: state.scene, cast: state.cast, messages: state.messages };
     saveTextFile('writetogether-chat.json', JSON.stringify(data, null, 1)).catch(fail('Export'));
   });
   $('#import').addEventListener('click', async () => {
@@ -634,7 +803,12 @@ function buildUI() {
       // Older exports stored the scene under "system".
       state.scene = typeof j.scene === 'string' ? j.scene : typeof j.system === 'string' ? j.system : '';
       state.messages = j.messages;
+      state.cast = {
+        you: { ...defaults.cast.you, ...j.cast?.you },
+        them: { ...defaults.cast.them, ...j.cast?.them },
+      };
       $<HTMLTextAreaElement>('#scene').value = state.scene;
+      syncCastInputs();
       persist(); render();
     } catch (err) { fail('Import')(err); }
   });
