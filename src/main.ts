@@ -64,7 +64,7 @@ function switchVariant(m: Message, idx: number) {
 
 async function generate(target?: Message) {
   const { apiKey, chatModel } = state.settings;
-  if (!apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
+  if (!apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; state.settings.sidebar = true; return render(); }
   banner = '';
   pageIdx = null;
   let msg: Message;
@@ -150,7 +150,7 @@ function send() {
 /** mode 'draft': LLM drafts a fresh prompt, then renders it. 'render': render the (possibly edited) prompt as-is. */
 async function makeImage(m: Message, mode: 'draft' | 'render') {
   const s = state.settings;
-  if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
+  if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; state.settings.sidebar = true; return render(); }
   banner = '';
   const im = (m.image ??= { prompt: '' });
   im.error = undefined;
@@ -513,8 +513,11 @@ function renderPager() {
 function render() {
   const view = state.settings.view;
   const paged = view === 'paged';
+  $('#side').hidden = !state.settings.sidebar;
+  $('#toggleSide').textContent = state.settings.sidebar ? '‹ Hide setup' : '☰ Setup';
   $('#chat').hidden = paged;
   $('#pager').hidden = !paged;
+  document.querySelector('main')!.classList.toggle('paged', paged);
   $('#pagernav').hidden = !paged;
   $('#v-paged').classList.toggle('on', paged);
   $('#v-chat').classList.toggle('on', !paged);
@@ -578,7 +581,7 @@ async function setPortrait(who: Who, src: string) {
 
 async function makePortrait(who: Who) {
   const s = state.settings, c = state.cast[who];
-  if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; return render(); }
+  if (!s.apiKey) { banner = 'Add your OpenRouter API key in Settings first.'; state.settings.sidebar = true; return render(); }
   if (!c.description.trim()) { banner = 'Describe the character first (age, build, hair, clothing…).'; return render(); }
   banner = '';
   portraitBusy.add(who); render();
@@ -722,6 +725,7 @@ function buildUI() {
   <main>
     <div id="banner" hidden></div>
     <div id="topbar">
+      <button id="toggleSide" title="Show or hide the scene, characters and settings">‹ Hide setup</button>
       <div class="seg"><button id="v-paged" title="One turn per page, with a stable photo">Paged</button><button id="v-chat" title="Scrolling conversation">Chat</button></div>
       <div id="pagernav">
         <button id="p-first" title="First page">«</button><button id="p-prev" title="Previous page (←)">‹</button>
@@ -767,6 +771,7 @@ function buildUI() {
   $('#chat').addEventListener('click', onChatClick);
   $('#pager').addEventListener('click', onChatClick);
   const setView = (v: 'paged' | 'chat') => { state.settings.view = v; persist(); render(); };
+  $('#toggleSide').addEventListener('click', () => { state.settings.sidebar = !state.settings.sidebar; persist(); render(); });
   $('#v-paged').addEventListener('click', () => setView('paged'));
   $('#v-chat').addEventListener('click', () => setView('chat'));
   $('#autoImage').addEventListener('change', e => { state.settings.autoImage = (e.target as HTMLInputElement).checked; persist(); });

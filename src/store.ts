@@ -24,6 +24,7 @@ export interface Settings {
   systemPrompt: string;     // part of settings (saved with the settings file)
   autoImage: boolean;       // generate a companion image automatically after each reply
   view: 'paged' | 'chat';
+  sidebar: boolean;         // setup sidebar (scene, characters, settings) shown
 }
 
 export interface State { scene: string; cast: Record<Who, Character>; messages: Message[]; settings: Settings }  // scene is saved with the chat
@@ -47,6 +48,7 @@ export const defaults: State = {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     autoImage: false,
     view: 'paged',
+    sidebar: true,
   },
 };
 
