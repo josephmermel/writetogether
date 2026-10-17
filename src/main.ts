@@ -25,6 +25,8 @@ let state: State;
 let editingId: string | null = null;
 let streamingId: string | null = null;
 let abort: AbortController | null = null;
+// Composer holds two drafts; both are sent together (OOC note first, then the in-character message).
+const drafts = { ic: '', ooc: '' };
 let oocMode = false;
 let banner = '';
 const imageBusy = new Map<string, string>(); // message id -> status text
@@ -88,16 +90,28 @@ function fitInput() {
   el.style.height = el.scrollHeight + 2 + 'px'; // CSS max-height caps this, then it scrolls
 }
 
+function setMode(ooc: boolean) {
+  const input = $<HTMLTextAreaElement>('#input');
+  drafts[oocMode ? 'ooc' : 'ic'] = input.value;
+  oocMode = ooc;
+  input.value = drafts[oocMode ? 'ooc' : 'ic'];
+  fitInput(); render();
+  input.focus();
+}
+
 function send() {
   const input = $<HTMLTextAreaElement>('#input');
-  const t = input.value.trim();
-  const last = state.messages.at(-1);
-  if (!t) {
+  drafts[oocMode ? 'ooc' : 'ic'] = input.value;
+  const ooc = drafts.ooc.trim(), ic = drafts.ic.trim();
+  if (!ooc && !ic) {
     // Empty send: retry a reply to a dangling user message (e.g. after an error).
-    if (last?.role === 'user') generate();
+    if (state.messages.at(-1)?.role === 'user') generate();
     return;
   }
-  state.messages.push({ id: uid(), role: 'user', ooc: oocMode || undefined, variants: [t], active: 0 });
+  if (ooc) state.messages.push({ id: uid(), role: 'user', ooc: true, variants: [ooc], active: 0 });
+  if (ic) state.messages.push({ id: uid(), role: 'user', variants: [ic], active: 0 });
+  drafts.ic = drafts.ooc = '';
+  oocMode = false; // always return to in-character after sending
   input.value = '';
   fitInput();
   persist();
@@ -242,6 +256,17 @@ function msgEl(m: Message, i: number): HTMLElement {
   return el;
 }
 
+function updateComposer() {
+  const input = $<HTMLTextAreaElement>('#input');
+  drafts[oocMode ? 'ooc' : 'ic'] = input.value;
+  $('#composer').classList.toggle('ooc', oocMode);
+  $('#tab-ic').classList.toggle('on', !oocMode);
+  $('#tab-ooc').classList.toggle('on', oocMode);
+  $('#tab-ic').classList.toggle('has', !!drafts.ic.trim());
+  $('#tab-ooc').classList.toggle('has', !!drafts.ooc.trim());
+  input.placeholder = oocMode ? 'Out-of-character note to the narrator…' : 'Write your message…';
+}
+
 function render() {
   const chat = $('#chat');
   const keep = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160;
@@ -251,8 +276,7 @@ function render() {
   const b = $('#banner');
   b.textContent = banner; b.hidden = !banner;
   $('#send').textContent = streamingId ? 'Stop' : 'Send';
-  $('#ooc').classList.toggle('on', oocMode);
-  $<HTMLTextAreaElement>('#input').placeholder = oocMode ? 'Out-of-character note to the narrator…' : 'Write your message…';
+  updateComposer();
 }
 
 function onChatClick(e: MouseEvent) {
@@ -346,8 +370,14 @@ function buildUI() {
     <div id="banner" hidden></div>
     <div id="chat"></div>
     <form id="composer">
-      <button type="button" id="ooc" title="Send as an out-of-character message">OOC</button>
-      <textarea id="input" ></textarea>
+      <div class="compose-main">
+        <div class="tabs" role="tablist">
+          <button type="button" id="tab-ic" role="tab" title="In-character message">In character</button>
+          <button type="button" id="tab-ooc" role="tab" title="Out-of-character note, sent as [OOC: …]">OOC</button>
+          <span class="tabhint">Both are sent together</span>
+        </div>
+        <textarea id="input"></textarea>
+      </div>
       <button id="send" class="primary" type="submit">Send</button>
     </form>
   </main>`;
@@ -369,12 +399,13 @@ function buildUI() {
   if (!s.apiKey) ($('#settings') as HTMLDetailsElement).open = true;
 
   $('#chat').addEventListener('click', onChatClick);
-  $('#ooc').addEventListener('click', () => { oocMode = !oocMode; render(); });
+  $('#tab-ic').addEventListener('click', () => setMode(false));
+  $('#tab-ooc').addEventListener('click', () => setMode(true));
   $('#composer').addEventListener('submit', e => {
     e.preventDefault();
     if (streamingId) abort?.abort(); else send();
   });
-  $('#input').addEventListener('input', fitInput);
+  $('#input').addEventListener('input', () => { fitInput(); updateComposer(); });
   $('#input').addEventListener('keydown', e => {
     const k = e as KeyboardEvent;
     if (k.key === 'Enter' && !k.shiftKey && !k.isComposing) { k.preventDefault(); if (!streamingId) send(); }
