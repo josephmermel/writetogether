@@ -203,12 +203,15 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
         use.map((w, i) => `Reference image ${i + 1} is ${castName(w)}.`).join(' ') +
         " Keep each person's face, hair, skin tone and build faithful to their reference image. Scene: " + final;
     }
+    im.note = undefined;
     try {
       im.src = await generateImage(s.apiKey, model, final, s.aspect, use.map(w => state.cast[w].image!));
     } catch (e) {
-      const hint = use.length && /block|moderat|flagged|policy|safety/i.test((e as Error).message)
-        ? ' — the reference images may have been blocked; untick a reference character and retry.' : '';
-      throw new Error((e as Error).message + hint);
+      // Providers often block reference images (a face plus a suggestive scene). Fall back to text only, once.
+      if (!use.length || !/block|moderat|flagged|policy|safety/i.test((e as Error).message)) throw e;
+      imageBusy.set(m.id, 'References were blocked — retrying without them…'); render();
+      im.src = await generateImage(s.apiKey, model, im.prompt.trim(), s.aspect);
+      im.note = 'The model blocked the reference images, so this image was made without them.';
     }
   } catch (e) { im.error = (e as Error).message; }
   imageBusy.delete(m.id); persist(); render();
@@ -319,6 +322,7 @@ function msgEl(m: Message, i: number, inPager = false): HTMLElement {
       img.src = im.src; img.alt = im.prompt;
       fig.append(img);
     }
+    if (im.note) fig.append(Object.assign(document.createElement('div'), { className: 'imgnote', textContent: im.note }));
     if (im.error) {
       const err = document.createElement('div');
       err.className = 'imgerror'; err.textContent = im.error;
@@ -423,6 +427,7 @@ function imagePane(m: Message): HTMLElement {
   }
   if (status) (frame ?? stage).insertAdjacentHTML('beforeend', `<div class="status">${status}</div>`);
   el.append(stage);
+  if (im?.note) el.append(Object.assign(document.createElement('div'), { className: 'imgnote', textContent: im.note }));
   if (im?.error) el.insertAdjacentHTML('beforeend', '<div class="imgerror"></div>');
   if (im?.error) el.querySelector('.imgerror')!.textContent = im.error;
 

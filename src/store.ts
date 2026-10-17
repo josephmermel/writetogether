@@ -3,7 +3,7 @@ import { DEFAULT_CHAT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_PROMPT_MODEL } from '.
 export type Who = 'you' | 'them'; // you = the user's character, them = the narrator's character
 export interface Character { name: string; description: string; image?: string; avatar?: string }
 
-export interface MsgImage { src?: string; prompt: string; error?: string; model?: string; refs?: Who[] }
+export interface MsgImage { src?: string; prompt: string; error?: string; model?: string; refs?: Who[]; note?: string }
 
 export interface Message {
   id: string;
