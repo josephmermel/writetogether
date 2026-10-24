@@ -41,3 +41,26 @@ export async function openTextFile(): Promise<string | null> {
     i.click();
   });
 }
+
+export interface PickedFile { name: string; text: string }
+
+/** Pick several files at once (chat exports as .json, or plain .txt/.md scene notes). Empty list if cancelled. */
+export async function openTextFiles(): Promise<PickedFile[]> {
+  const read = async (fs: File[]) => Promise.all(fs.map(async f => ({ name: f.name, text: await f.text() })));
+  if (w.showOpenFilePicker) {
+    try {
+      const hs = await w.showOpenFilePicker({
+        multiple: true,
+        types: [{ description: 'Chats and notes', accept: { 'application/json': ['.json'], 'text/plain': ['.txt', '.md'] } }],
+      });
+      return read(await Promise.all(hs.map(h => h.getFile())));
+    } catch (e) { if (cancelled(e)) return []; throw e; }
+  }
+  return new Promise(res => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.multiple = true; i.accept = '.json,.txt,.md,application/json,text/plain';
+    i.onchange = async () => res(i.files ? await read([...i.files]) : []);
+    i.oncancel = () => res([]);
+    i.click();
+  });
+}

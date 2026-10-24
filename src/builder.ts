@@ -1,7 +1,7 @@
 // Builder page: study saved/imported chats, then ask a model for new situations, character descriptions
 // and short "memories" that can be dropped into the scene, the system instructions or the memories box.
 import { streamChat } from './api';
-import { openTextFile } from './files';
+import { openTextFiles, type PickedFile } from './files';
 import { libDelete, libList, libPut, parseChatFile, toLibrary, type LibraryChat, type State } from './store';
 
 export interface BuilderCtx {
@@ -244,6 +244,41 @@ const defaultTitle = (c: { scene: string; cast: LibraryChat['cast'] }) => {
   return names || c.scene.trim().slice(0, 40) || `Chat ${new Date().toLocaleDateString()}`;
 };
 
+/** "writetogether-chat (2).json" -> "chat (2)"; plain names are kept. */
+const titleFromFile = (name: string) => name.replace(/\.[^.]+$/, '').replace(/^writetogether-/, '').trim() || 'Imported file';
+
+/** Add chat exports (.json) and plain-text notes (.txt/.md) to the library and select them as sources. */
+async function importFiles(files: PickedFile[]) {
+  if (!files.length) return;
+  const b = ctx.state().builder;
+  const taken = new Set(library.map(c => c.title));
+  const added: string[] = [], skipped: string[] = [];
+  for (const f of files) {
+    try {
+      let title = titleFromFile(f.name);
+      for (let n = 2; taken.has(title); n++) title = `${titleFromFile(f.name)} (${n})`;
+      let chat: LibraryChat;
+      if (/\.json$/i.test(f.name) || f.text.trimStart().startsWith('{')) {
+        const j = JSON.parse(f.text);
+        if (j?.app === 'writetogether-settings') throw new Error('this is a settings file');
+        chat = parseChatFile(j, title);
+      } else {
+        // Plain text / markdown: treat the whole file as a scene description.
+        chat = { id: crypto.randomUUID(), title, savedAt: Date.now(), scene: f.text.trim(), messages: [],
+          cast: { you: { name: '', description: '' }, them: { name: '', description: '' } } };
+      }
+      chat.title = title; taken.add(title);
+      await libPut(chat);
+      b.selected = [...new Set([...b.selected, chat.id])];
+      b.detail[chat.id] = 'full';
+      added.push(title);
+    } catch (e) { skipped.push(`${f.name} (${(e as Error).message})`); }
+  }
+  ctx.persist();
+  await refreshLibrary();
+  ctx.toast(`Imported ${added.length} file${added.length === 1 ? '' : 's'}` + (skipped.length ? `; skipped ${skipped.join(', ')}` : '') + '.');
+}
+
 export async function archiveCurrent(title?: string): Promise<void> {
   const st = ctx.state();
   if (!st.messages.length) return;
@@ -258,12 +293,12 @@ export function initBuilder(c: BuilderCtx) {
     <section id="b-sources">
       <h3>Sources</h3>
       <div class="b-btns">
-        <button id="b-import">Import chat file…</button>
+        <button id="b-import" title="Pick one or more chat exports (.json) or text/markdown scene notes, or drag them onto this panel">Import files…</button>
         <button id="b-save">Save current chat to library</button>
       </div>
       <div id="b-list"></div>
       <p class="hint" id="b-tokens"></p>
-      <p class="hint">Imported and saved chats are kept in this browser (text only). Choose "Full story" to include the conversation itself; long stories are trimmed to the opening and the latest part.</p>
+      <p class="hint">Drag chat exports (.json) or scene notes (.txt, .md) onto this panel, or use Import files…. Imported files are selected with "Full story" by default; long stories are trimmed to the opening and the latest part. Sources live in this browser only (text, no images), so re-import after clearing it.</p>
     </section>
     <section id="b-work">
       <div id="b-thread"></div>
@@ -295,17 +330,16 @@ export function initBuilder(c: BuilderCtx) {
     if (k.key === 'Enter' && (k.ctrlKey || k.metaKey)) { k.preventDefault(); send(); }
   });
   $('#b-import').addEventListener('click', async () => {
-    try {
-      const t = await openTextFile();
-      if (t === null) return;
-      const draft = parseChatFile(JSON.parse(t), '');
-      draft.title = prompt('Name for this chat in the library?', defaultTitle(draft)) ?? '';
-      if (!draft.title.trim()) return;
-      await libPut(draft);
-      const b = ctx.state().builder;
-      b.selected = [...new Set([...b.selected, draft.id])]; ctx.persist();
-      await refreshLibrary();
-    } catch (e) { ctx.banner(`Import failed: ${(e as Error).message}`); }
+    try { await importFiles(await openTextFiles()); } catch (e) { ctx.banner(`Import failed: ${(e as Error).message}`); }
+  });
+  const drop = $('#b-sources');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dropping'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dropping'));
+  drop.addEventListener('drop', async e => {
+    e.preventDefault(); drop.classList.remove('dropping');
+    const fs = [...(e.dataTransfer?.files ?? [])];
+    try { await importFiles(await Promise.all(fs.map(async f => ({ name: f.name, text: await f.text() })))); }
+    catch (err) { ctx.banner(`Import failed: ${(err as Error).message}`); }
   });
   $('#b-save').addEventListener('click', async () => {
     const st = ctx.state();

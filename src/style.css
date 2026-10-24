@@ -175,3 +175,4 @@ main.paged #composer { max-width: 1400px; }
 #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px;
   border-radius: 8px; font-size: 14px; z-index: 30; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
 @media (max-width: 900px) { #builder { grid-template-columns: 1fr; overflow-y: auto; } }
+#b-sources.dropping { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
