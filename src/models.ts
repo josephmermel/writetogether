@@ -19,6 +19,9 @@ export const IMAGE_MODELS: ImageModel[] = [
   // New in Oct 2026, not yet checked against the moderation test. BFL approves safety_tolerance per model:
   // for FLUX 3 the maximum approved for this account is 4 (sending 5 returns a 422). Reference cost unmeasured.
   { id: 'black-forest-labs/flux-3-image-klein', label: 'FLUX 3 Klein (new)', price: 0.008, speed: 'untested', maxRefs: 10, refCost: 0, resolution: '768', prov: ['black-forest-labs', { safety_tolerance: 4 }] },
+  // Qwen Image 2.1 Turbo: flat $0.0184 at 1K and 2K; reference images are free on OpenRouter. Qwen Image 3 had its
+  // references blocked by Alibaba's moderation; 2.1 is untested with references (blocked ones fall back to text-only).
+  { id: 'qwen/qwen-image-2.1-turbo', label: 'Qwen Image 2.1 Turbo', price: 0.0184, speed: 'untested', maxRefs: 4, refCost: 0, resolution: '1K' },
   { id: 'sourceful/riverflow-v2.5-fast', label: 'Riverflow v2.5 fast', price: 0.022, speed: '~40s', maxRefs: 4, refCost: 0.065 },
   { id: 'sourceful/riverflow-v2-fast', label: 'Riverflow v2 fast', price: 0.02, speed: '~3.5min', maxRefs: 4, refCost: 0.2 },
   // Qwen: Alibaba's moderation blocked requests once reference images were attached, so no maxRefs.
