@@ -1,7 +1,7 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import './style.css';
-import { streamChat, completeChat, generateImage, type ChatMsg } from './api';
+import { streamChat, completeChat, generateImage, loadReasoningInfo, reasoningFor, type ChatMsg, type Thinking } from './api';
 import { IMAGE_MODELS, TEXT_MODELS, modelLabel, modelInfo } from './models';
 import { downscale, makeAvatar } from './images';
 import { saveTextFile, openTextFile } from './files';
@@ -92,12 +92,14 @@ async function generate(target?: Message) {
   render();
   const body = () => document.querySelector(`[data-id="${msg.id}"] .body`) as HTMLElement | null;
   let ok = true;
+  await loadReasoningInfo();
+  const reasoning = reasoningFor(chatModel, state.settings.thinking).param;
   try {
     await streamChat(apiKey, chatModel, toChat(history), (_d, full) => {
       msg.variants[variantIdx] = full;
       const el = body();
       if (el) { el.innerHTML = md(full); scrollIfNear(); }
-    }, abort.signal);
+    }, abort.signal, reasoning);
   } catch (e) {
     ok = false;
     if ((e as Error).name !== 'AbortError') banner = (e as Error).message;
@@ -520,6 +522,16 @@ function renderPager() {
   }
 }
 
+/** Keep both thinking selects and the explanatory hint in step with the setting and the chosen model. */
+function updateThinkingUI() {
+  const t = state.settings.thinking;
+  ($('#thinking') as HTMLSelectElement).value = t;
+  ($('#thinkingTop') as HTMLSelectElement).value = t;
+  const note = reasoningFor(state.settings.chatModel, t).note;
+  $('#thinkingHint').textContent = note;
+  $('#thinkingTop').title = note;
+}
+
 function render() {
   const view = state.settings.view;
   const paged = view === 'paged', chatView = view === 'chat', builder = view === 'builder';
@@ -557,6 +569,7 @@ function render() {
   b.textContent = banner; b.hidden = !banner;
   $('#send').textContent = streamingId ? 'Stop' : 'Send';
   refreshCast();
+  updateThinkingUI();
   updateComposer();
 }
 
@@ -694,9 +707,9 @@ function modelPicker(
   };
   sel.addEventListener('change', () => {
     if (sel.value === '__custom') { txt.hidden = false; txt.value = get() || ''; txt.focus(); return; }
-    set(sel.value); persist(); refresh();
+    set(sel.value); persist(); refresh(); updateThinkingUI();
   });
-  txt.addEventListener('input', () => { set(txt.value.trim()); persist(); });
+  txt.addEventListener('input', () => { set(txt.value.trim()); persist(); updateThinkingUI(); });
   refresh();
   return { refresh };
 }
@@ -722,6 +735,9 @@ function buildUI() {
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-or-…" />
       <label>Chat model</label>
       <div id="chatModel" class="picker"></div>
+      <label>Thinking <small>(reasoning before replying)</small></label>
+      <select id="thinking"><option value="default">Model default</option><option value="off">Off</option><option value="low">Low</option><option value="high">High</option><option value="max">Max</option></select>
+      <p class="hint" id="thinkingHint"></p>
       <label>Image-prompt model <small>(blank = chat model)</small></label>
       <div id="promptModel" class="picker"></div>
       <label>Image model</label>
@@ -752,6 +768,7 @@ function buildUI() {
         <button id="p-next" title="Next page (→)">›</button><button id="p-last" title="Latest page">»</button>
       </div>
       <div class="toggles">
+        <label class="auto" title="Reasoning before each reply. Change it and press regenerate (↻) to compare."><span>Thinking</span> <select id="thinkingTop"><option value="default">Default</option><option value="off">Off</option><option value="low">Low</option><option value="high">High</option><option value="max">Max</option></select></label>
         <label class="auto" title="Send the character portraits to the image model as reference images. Off = rely on the written appearance descriptions only."><input type="checkbox" id="useRefs" /> Reference images</label>
         <label class="auto" title="Generate a companion image after every reply"><input type="checkbox" id="autoImage" /> Auto photo</label>
       </div>
@@ -799,6 +816,11 @@ function buildUI() {
   $('#v-paged').addEventListener('click', () => setView('paged'));
   $('#v-chat').addEventListener('click', () => setView('chat'));
   $('#v-builder').addEventListener('click', () => setView('builder'));
+  for (const id of ['thinking', 'thinkingTop']) {
+    $(`#${id}`).addEventListener('change', e => {
+      state.settings.thinking = (e.target as HTMLSelectElement).value as Thinking; persist(); updateThinkingUI();
+    });
+  }
   $('#useRefs').addEventListener('change', e => { state.settings.useRefs = (e.target as HTMLInputElement).checked; persist(); render(); });
   $('#autoImage').addEventListener('change', e => { state.settings.autoImage = (e.target as HTMLInputElement).checked; persist(); });
   const nav = () => pageIndex(pages().length);
@@ -905,4 +927,5 @@ load().then(s => {
   pickers.builderModel = modelPicker('b-model', [{ value: '', label: 'Builder model: same as chat model' },
     ...TEXT_MODELS.map(m => ({ value: m.id, label: m.label }))], () => state.settings.builderModel, v => state.settings.builderModel = v);
   render();
+  void loadReasoningInfo().then(updateThinkingUI);
 });

@@ -23,10 +23,11 @@ async function fail(res: Response): Promise<never> {
 export async function streamChat(
   key: string, model: string, messages: ChatMsg[],
   onToken: (delta: string, full: string) => void, signal: AbortSignal,
+  reasoning?: Record<string, unknown>,
 ): Promise<string> {
   const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST', headers: headers(key), signal,
-    body: JSON.stringify({ model, messages, stream: true }),
+    body: JSON.stringify({ model, messages, stream: true, ...(reasoning && { reasoning }) }),
   });
   if (!res.ok) return fail(res);
   const reader = res.body!.getReader();
@@ -84,4 +85,50 @@ export async function generateImage(
   if (item?.b64_json) return `data:${item.media_type ?? 'image/png'};base64,${item.b64_json}`;
   if (item?.url) return item.url;
   throw new Error('No image returned (the model may have refused the prompt)');
+}
+
+// ---- Thinking (reasoning) control -------------------------------------------------------------
+// OpenRouter takes a unified `reasoning` parameter, but what a model allows differs: some can't turn
+// thinking off ("mandatory") and each supports a different set of effort levels. /models tells us which.
+
+export type Thinking = 'default' | 'off' | 'low' | 'high' | 'max';
+interface ReasoningInfo { mandatory?: boolean; default_enabled?: boolean; default_effort?: string; supported_efforts?: string[] }
+let reasoningInfo: Map<string, ReasoningInfo> | null = null;
+const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+/** Fetches model capabilities once (public endpoint). Failure is harmless: requests then use best-effort values. */
+export async function loadReasoningInfo(): Promise<void> {
+  if (reasoningInfo) return;
+  try {
+    const res = await fetch(`${BASE}/models`);
+    if (!res.ok) return;
+    const data = (await res.json()).data as { id: string; reasoning?: ReasoningInfo }[];
+    reasoningInfo = new Map(data.filter(m => m.reasoning).map(m => [m.id, m.reasoning!]));
+  } catch { /* offline or blocked: ignore */ }
+}
+
+/** The `reasoning` request value for the user's setting on this model, plus a plain-language note. */
+export function reasoningFor(model: string, setting: Thinking): { param?: Record<string, unknown>; note: string } {
+  if (setting === 'default') return { note: describeDefault(model) };
+  const info = reasoningInfo?.get(model);
+  const want = setting === 'off' ? 'none' : setting;
+  if (!info) return { param: want === 'none' ? { enabled: false } : { effort: want }, note: 'Model capabilities unknown; sending the setting as-is.' };
+  const sup = (info.supported_efforts ?? []).filter(e => e !== 'none');
+  const nearest = (target: string) => sup.length
+    ? sup.reduce((a, b) => (Math.abs(EFFORTS.indexOf(b) - EFFORTS.indexOf(target)) < Math.abs(EFFORTS.indexOf(a) - EFFORTS.indexOf(target)) ? b : a))
+    : target;
+  if (want === 'none') {
+    if (!info.mandatory) return { param: { effort: 'none' }, note: 'Thinking off.' };
+    const low = nearest('low');
+    return { param: { effort: low }, note: `This model always thinks and cannot be switched off, so "Off" uses its lowest level (${low}).` };
+  }
+  const use = nearest(want);
+  return { param: { effort: use }, note: use === want ? `Thinking ${use}.` : `This model has no "${want}" level; using "${use}".` };
+}
+
+function describeDefault(model: string): string {
+  const i = reasoningInfo?.get(model);
+  if (!i) return 'Uses the model\'s own default.';
+  const on = i.default_enabled ? `thinks by default${i.default_effort ? ` (${i.default_effort})` : ''}` : 'does not think by default';
+  return `Model default: ${on}${i.mandatory ? '; thinking cannot be turned off' : ''}.`;
 }

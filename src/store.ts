@@ -25,6 +25,7 @@ export interface Settings {
   useRefs: boolean;         // send character portraits to the image model as reference images
   autoImage: boolean;       // generate a companion image automatically after each reply
   view: 'paged' | 'chat' | 'builder';
+  thinking: 'default' | 'off' | 'low' | 'high' | 'max'; // reasoning level for roleplay replies
   memories: string;         // short background facts, sent to the model with the system instructions
   builderModel: string;     // model for the Builder page ('' = chat model)
   sidebar: boolean;         // setup sidebar (scene, characters, settings) shown
@@ -68,6 +69,7 @@ export const defaults: State = {
     autoImage: false,
     view: 'paged',
     sidebar: true,
+    thinking: 'default',
     memories: '',
     builderModel: '',
   },
