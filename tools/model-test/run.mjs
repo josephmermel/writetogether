@@ -25,7 +25,8 @@ const REFS = flag('refs');
 const API = process.env.OPENROUTER_BASE ?? 'https://openrouter.ai/api/v1';
 // Models that accept reference images AND passed the moderation test.
 const REF_MODELS = ['black-forest-labs/flux.2-klein-4b', 'black-forest-labs/flux.2-pro', 'sourceful/riverflow-v2.5-fast',
-  'sourceful/riverflow-v2-fast', 'qwen/qwen-image-3', 'qwen/qwen-image-3-pro'];
+  'sourceful/riverflow-v2-fast', 'qwen/qwen-image-3', 'qwen/qwen-image-3-pro',
+  'black-forest-labs/flux-3-image-klein', 'qwen/qwen-image-2.1-turbo', 'qwen/qwen-image-2.1-pro'];
 
 // est = rough $/image at the cheapest setting (null = token-priced/unknown; real cost is read from the response).
 // opts = provider passthrough params that RELAX moderation where the provider exposes such a knob.
@@ -42,6 +43,10 @@ const ALL = [
   { id: 'openai/gpt-5.4-image-2', est: 0.02, body: L, prov: ['openai', OAI] },
   { id: 'black-forest-labs/flux.2-klein-4b', est: 0.014, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
   { id: 'black-forest-labs/flux.2-pro', est: 0.03, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
+  // Added to OpenRouter in mid-October 2026:
+  { id: 'black-forest-labs/flux-3-image-klein', est: 0.008, body: { resolution: '768' }, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
+  { id: 'qwen/qwen-image-2.1-turbo', est: 0.0184, body: { resolution: '1K' } },
+  { id: 'qwen/qwen-image-2.1-pro', est: 0.046, body: { resolution: '1K' } },
   { id: 'bytedance-seed/seedream-5-0-flash', est: 0.018 },
   { id: 'bytedance-seed/seedream-5-0-lite', est: 0.035 },
   { id: 'bytedance-seed/seedream-4.5', est: 0.04 },
