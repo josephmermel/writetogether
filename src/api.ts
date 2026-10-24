@@ -71,11 +71,13 @@ export async function completeChat(key: string, model: string, messages: ChatMsg
 export async function generateImage(
   key: string, model: string, prompt: string, aspect: string, refs: string[] = [],
 ): Promise<string> {
-  const prov = modelInfo(model)?.prov;
+  const info = modelInfo(model);
+  const prov = info?.prov;
   const res = await fetch(`${BASE}/images`, {
     method: 'POST', headers: headers(key),
     body: JSON.stringify({
       model, prompt, n: 1, aspect_ratio: aspect,
+      ...(info?.resolution && { resolution: info.resolution }),
       ...(prov && { provider: { options: { [prov[0]]: prov[1] } } }),
       ...(refs.length && { input_references: refs.map(url => ({ type: 'image_url', image_url: { url } })) }),
     }),

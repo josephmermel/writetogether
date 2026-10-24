@@ -7,6 +7,8 @@ export interface ImageModel {
   /** Reference-image support: max images, and measured extra $ per reference image. Absent = not usable. */
   maxRefs?: number;
   refCost?: number;
+  /** Output size tier sent as `resolution` (some models price by tier; omit for the model default). */
+  resolution?: string;
   /** Provider passthrough options that relax moderation, if the provider has such a knob. */
   prov?: [provider: string, options: Record<string, unknown>];
 }
@@ -14,6 +16,9 @@ export interface ImageModel {
 export const IMAGE_MODELS: ImageModel[] = [
   { id: 'black-forest-labs/flux.2-klein-4b', label: 'FLUX.2 klein 4B', price: 0.014, speed: '~4s', maxRefs: 4, refCost: 0.001, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
   { id: 'black-forest-labs/flux.2-pro', label: 'FLUX.2 pro', price: 0.03, speed: '~13s', maxRefs: 8, refCost: 0.015, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
+  // New in Oct 2026, not yet checked against the moderation test. BFL approves safety_tolerance per model:
+  // for FLUX 3 the maximum approved for this account is 4 (sending 5 returns a 422). Reference cost unmeasured.
+  { id: 'black-forest-labs/flux-3-image-klein', label: 'FLUX 3 Klein (new)', price: 0.008, speed: 'untested', maxRefs: 10, refCost: 0, resolution: '768', prov: ['black-forest-labs', { safety_tolerance: 4 }] },
   { id: 'sourceful/riverflow-v2.5-fast', label: 'Riverflow v2.5 fast', price: 0.022, speed: '~40s', maxRefs: 4, refCost: 0.065 },
   { id: 'sourceful/riverflow-v2-fast', label: 'Riverflow v2 fast', price: 0.02, speed: '~3.5min', maxRefs: 4, refCost: 0.2 },
   // Qwen: Alibaba's moderation blocked requests once reference images were attached, so no maxRefs.
