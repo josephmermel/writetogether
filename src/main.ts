@@ -208,7 +208,9 @@ async function makeImage(m: Message, mode: 'draft' | 'render') {
     if (use.length) {
       final = 'Use the reference images for character identity. ' +
         use.map((w, i) => `Reference image ${i + 1} is ${castName(w)}.`).join(' ') +
-        " Keep each person's face, hair, skin tone and build faithful to their reference image. Scene: " + final;
+        " Keep each person's face, hair, skin tone and build faithful to their reference image." +
+        (s.portraitStyle === 'photo' ? '' : ' The reference images are drawings that only define each character\'s design; render the scene in the style described below.') +
+        ' Scene: ' + final;
     }
     im.note = undefined;
     try {
@@ -602,6 +604,14 @@ function onChatClick(e: MouseEvent) {
   render();
 }
 
+const PORTRAIT_STYLES: Record<string, string> = {
+  photo: 'photorealistic',
+  illustration: 'semi-realistic digital illustration, painterly, clearly an illustration and not a photograph',
+  anime: 'anime style illustration with cel shading',
+  sketch: 'pencil sketch drawing, line art with light shading on white paper',
+  cartoon: 'stylized cartoon illustration, flat colors and bold outlines',
+};
+
 async function setPortrait(who: Who, src: string) {
   const c = state.cast[who];
   c.image = await downscale(src, 768);
@@ -617,7 +627,8 @@ async function makePortrait(who: Who) {
   portraitBusy.add(who); render();
   try {
     const prompt = 'Full-body character reference portrait, standing facing the camera in a relaxed neutral pose, ' +
-      'head to toe in frame, plain light background, photorealistic. An adult over 18: ' + c.description.trim();
+      `head to toe in frame, plain light background, ${PORTRAIT_STYLES[s.portraitStyle] ?? PORTRAIT_STYLES.photo}. ` +
+      'An adult over 18: ' + c.description.trim();
     await setPortrait(who, await generateImage(s.apiKey, s.imageModel, prompt, '3:4'));
   } catch (e) { banner = `Portrait failed: ${(e as Error).message}`; }
   portraitBusy.delete(who); render();
@@ -722,6 +733,8 @@ function buildUI() {
     <textarea id="scene" placeholder="Describe the setting, characters and situation for this story…"></textarea>
     <details id="cast" open>
       <summary>Characters <small>(portraits, avatars, consistent scene images)</small></summary>
+      <label>Portrait style</label>
+      <select id="portraitStyle"><option value="photo">Photorealistic</option><option value="illustration">Semi-realistic illustration</option><option value="anime">Anime</option><option value="sketch">Pencil sketch</option><option value="cartoon">Cartoon</option></select>
       <div id="cast-you"></div>
       <div id="cast-them"></div>
     </details>
@@ -799,6 +812,7 @@ function buildUI() {
   syncCastInputs();
   bind('systemPrompt', () => s.systemPrompt, v => s.systemPrompt = v);
   bind('memories', () => s.memories, v => s.memories = v);
+  bind('portraitStyle', () => s.portraitStyle, v => s.portraitStyle = v as typeof s.portraitStyle);
   bind('apiKey', () => s.apiKey, v => s.apiKey = v.trim());
   const textOpts = TEXT_MODELS.map(m => ({ value: m.id, label: m.label }));
   pickers.chatModel = modelPicker('chatModel', textOpts, () => s.chatModel, v => s.chatModel = v);

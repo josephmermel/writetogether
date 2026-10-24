@@ -26,6 +26,7 @@ export interface Settings {
   autoImage: boolean;       // generate a companion image automatically after each reply
   view: 'paged' | 'chat' | 'builder';
   thinking: 'default' | 'off' | 'low' | 'high' | 'max'; // reasoning level for roleplay replies
+  portraitStyle: 'photo' | 'illustration' | 'anime' | 'sketch' | 'cartoon'; // look of generated character portraits
   memories: string;         // short background facts, sent to the model with the system instructions
   builderModel: string;     // model for the Builder page ('' = chat model)
   sidebar: boolean;         // setup sidebar (scene, characters, settings) shown
@@ -70,6 +71,7 @@ export const defaults: State = {
     view: 'paged',
     sidebar: true,
     thinking: 'default',
+    portraitStyle: 'photo',
     memories: '',
     builderModel: '',
   },
