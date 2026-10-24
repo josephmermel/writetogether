@@ -44,7 +44,8 @@ const ALL = [
   { id: 'black-forest-labs/flux.2-klein-4b', est: 0.014, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
   { id: 'black-forest-labs/flux.2-pro', est: 0.03, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
   // Added to OpenRouter in mid-October 2026:
-  { id: 'black-forest-labs/flux-3-image-klein', est: 0.008, body: { resolution: '768' }, prov: ['black-forest-labs', { safety_tolerance: 5 }] },
+  // BFL approves safety_tolerance per model; for FLUX 3 the maximum approved is 4 (5 returns a 422).
+  { id: 'black-forest-labs/flux-3-image-klein', est: 0.008, body: { resolution: '768' }, prov: ['black-forest-labs', { safety_tolerance: 4 }] },
   { id: 'qwen/qwen-image-2.1-turbo', est: 0.0184, body: { resolution: '1K' } },
   { id: 'qwen/qwen-image-2.1-pro', est: 0.046, body: { resolution: '1K' } },
   { id: 'bytedance-seed/seedream-5-0-flash', est: 0.018 },
