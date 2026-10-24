@@ -149,3 +149,29 @@ main.paged #composer { max-width: 1400px; }
 .imgnote { font-size: 12px; color: var(--muted); padding: 2px 4px; }
 .toggles { display: flex; gap: 16px; margin-left: auto; }
 .toggles .auto { margin: 0; }
+#memories { font-size: 13px; min-height: 70px; }
+
+/* ---- Builder page ---- */
+#builder { flex: 1; min-height: 0; display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 16px; padding: 14px 16px;
+  width: 100%; max-width: 1400px; margin: 0 auto; }
+#b-sources { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+#b-sources h3, #b-work h3 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.b-btns { display: flex; flex-wrap: wrap; gap: 6px; } .b-btns button { font-size: 13px; padding: 4px 10px; }
+.b-src { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--panel); }
+.b-src label { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; color: var(--text); font-size: 14px; cursor: pointer; }
+.b-src label input { width: auto; } .b-src .b-title { font-weight: 600; } .b-src small { color: var(--muted); font-size: 12px; flex-basis: 100%; padding-left: 22px; }
+.b-src select { width: auto; font-size: 12px; padding: 3px 4px; }
+#b-work { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+#b-thread { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.bmsg { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--panel); }
+.bmsg.user { background: var(--user); margin-left: 12%; white-space: pre-wrap; font-size: .95rem; }
+.bmsg.assistant .body > :first-child { margin-top: 0; } .bmsg.assistant .body { line-height: 1.6; }
+.b-actions2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.b-actions2 button { padding: 3px 10px; font-size: 13px; } .b-actions2 select { width: auto; font-size: 13px; padding: 3px 4px; }
+.b-add { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.b-presets { display: flex; flex-wrap: wrap; gap: 6px; } .b-presets button { font-size: 13px; padding: 3px 10px; }
+.b-compose { display: flex; gap: 8px; align-items: stretch; } .b-compose textarea { flex: 1; resize: vertical; min-height: 80px; max-height: 40vh; }
+.b-side { display: flex; flex-direction: column; gap: 6px; width: 210px; } .b-side select, .b-side input { font-size: 13px; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px;
+  border-radius: 8px; font-size: 14px; z-index: 30; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
+@media (max-width: 900px) { #builder { grid-template-columns: 1fr; overflow-y: auto; } }

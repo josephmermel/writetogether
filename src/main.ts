@@ -5,6 +5,7 @@ import { streamChat, completeChat, generateImage, type ChatMsg } from './api';
 import { IMAGE_MODELS, TEXT_MODELS, modelLabel, modelInfo } from './models';
 import { downscale, makeAvatar } from './images';
 import { saveTextFile, openTextFile } from './files';
+import { initBuilder, renderBuilder, archiveCurrent } from './builder';
 import { load, save, uid, text, defaults, type Message, type State, type Who } from './store';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -45,7 +46,11 @@ const portraitBusy = new Set<Who>();
 
 function toChat(upTo: Message[]): ChatMsg[] {
   const out: ChatMsg[] = [];
-  const sys = [state.settings.systemPrompt.trim(), state.scene.trim() && `SCENE:\n${state.scene.trim()}`]
+  const sys = [
+    state.settings.systemPrompt.trim(),
+    state.settings.memories.trim() && `MEMORIES (background facts to remember and stay consistent with):\n${state.settings.memories.trim()}`,
+    state.scene.trim() && `SCENE:\n${state.scene.trim()}`,
+  ]
     .filter(Boolean).join('\n\n');
   if (sys) out.push({ role: 'system', content: sys });
   for (const m of upTo) {
@@ -517,15 +522,18 @@ function renderPager() {
 
 function render() {
   const view = state.settings.view;
-  const paged = view === 'paged';
+  const paged = view === 'paged', chatView = view === 'chat', builder = view === 'builder';
   $('#side').hidden = !state.settings.sidebar;
   $('#toggleSide').textContent = state.settings.sidebar ? '‹ Hide setup' : '☰ Setup';
-  $('#chat').hidden = paged;
+  $('#chat').hidden = !chatView;
   $('#pager').hidden = !paged;
+  $('#builder').hidden = !builder;
   document.querySelector('main')!.classList.toggle('paged', paged);
   $('#pagernav').hidden = !paged;
+  document.querySelector('.toggles')!.toggleAttribute('hidden', builder);
   $('#v-paged').classList.toggle('on', paged);
-  $('#v-chat').classList.toggle('on', !paged);
+  $('#v-chat').classList.toggle('on', chatView);
+  $('#v-builder').classList.toggle('on', builder);
   ($('#autoImage') as HTMLInputElement).checked = state.settings.autoImage;
   ($('#useRefs') as HTMLInputElement).checked = state.settings.useRefs;
 
@@ -534,13 +542,16 @@ function render() {
     // The composer belongs to the latest page; hide it while reading back.
     const n = pages().length;
     $('#composer').hidden = n > 0 && pageIndex(n) < n - 1;
-  } else {
+  } else if (chatView) {
     const chat = $('#chat');
     const keep = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160;
     chat.replaceChildren(...state.messages.map((m, i) => msgEl(m, i)));
     if (!state.messages.length) chat.innerHTML = '<p class="empty">Set the scene in the sidebar, then write your first message.</p>';
     if (keep) chat.scrollTop = chat.scrollHeight;
     $('#composer').hidden = false;
+  } else {
+    $('#composer').hidden = true;
+    renderBuilder();
   }
   const b = $('#banner');
   b.textContent = banner; b.hidden = !banner;
@@ -705,6 +716,8 @@ function buildUI() {
       <summary>Settings</summary>
       <label>System instructions <small>(saved with settings)</small></label>
       <textarea id="systemPrompt" rows="6"></textarea>
+      <label>Memories <small>(short background facts, saved with settings)</small></label>
+      <textarea id="memories" rows="4" placeholder="e.g. Dan hates being rushed. Leo teases when nervous. They met at the gym."></textarea>
       <label>OpenRouter API key</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="sk-or-…" />
       <label>Chat model</label>
@@ -732,7 +745,7 @@ function buildUI() {
     <div id="banner" hidden></div>
     <div id="topbar">
       <button id="toggleSide" title="Show or hide the scene, characters and settings">‹ Hide setup</button>
-      <div class="seg"><button id="v-paged" title="One turn per page, with a stable photo">Paged</button><button id="v-chat" title="Scrolling conversation">Chat</button></div>
+      <div class="seg"><button id="v-paged" title="One turn per page, with a stable photo">Paged</button><button id="v-chat" title="Scrolling conversation">Chat</button><button id="v-builder" title="Plan new scenes, characters and memories from earlier chats">Builder</button></div>
       <div id="pagernav">
         <button id="p-first" title="First page">«</button><button id="p-prev" title="Previous page (←)">‹</button>
         <span id="pageno"></span>
@@ -743,6 +756,7 @@ function buildUI() {
         <label class="auto" title="Generate a companion image after every reply"><input type="checkbox" id="autoImage" /> Auto photo</label>
       </div>
     </div>
+    <div id="builder" hidden></div>
     <div id="chat"></div>
     <div id="pager"><div id="pagetext"></div><div id="pageimg"></div></div>
     <form id="composer">
@@ -767,6 +781,7 @@ function buildUI() {
   WHO.forEach(buildCast);
   syncCastInputs();
   bind('systemPrompt', () => s.systemPrompt, v => s.systemPrompt = v);
+  bind('memories', () => s.memories, v => s.memories = v);
   bind('apiKey', () => s.apiKey, v => s.apiKey = v.trim());
   const textOpts = TEXT_MODELS.map(m => ({ value: m.id, label: m.label }));
   pickers.chatModel = modelPicker('chatModel', textOpts, () => s.chatModel, v => s.chatModel = v);
@@ -779,10 +794,11 @@ function buildUI() {
 
   $('#chat').addEventListener('click', onChatClick);
   $('#pager').addEventListener('click', onChatClick);
-  const setView = (v: 'paged' | 'chat') => { state.settings.view = v; persist(); render(); };
+  const setView = (v: 'paged' | 'chat' | 'builder') => { state.settings.view = v; persist(); render(); };
   $('#toggleSide').addEventListener('click', () => { state.settings.sidebar = !state.settings.sidebar; persist(); render(); });
   $('#v-paged').addEventListener('click', () => setView('paged'));
   $('#v-chat').addEventListener('click', () => setView('chat'));
+  $('#v-builder').addEventListener('click', () => setView('builder'));
   $('#useRefs').addEventListener('change', e => { state.settings.useRefs = (e.target as HTMLInputElement).checked; persist(); render(); });
   $('#autoImage').addEventListener('change', e => { state.settings.autoImage = (e.target as HTMLInputElement).checked; persist(); });
   const nav = () => pageIndex(pages().length);
@@ -807,8 +823,11 @@ function buildUI() {
     const k = e as KeyboardEvent;
     if (k.key === 'Enter' && !k.shiftKey && !k.isComposing) { k.preventDefault(); if (!streamingId) send(); }
   });
-  $('#clear').addEventListener('click', () => {
-    if (!confirm('Start a new chat? The current chat will be cleared (the scene and characters are cleared too; settings and system instructions are kept).')) return;
+  $('#clear').addEventListener('click', async () => {
+    const had = state.messages.length > 0;
+    if (!confirm('Start a new chat? ' + (had ? 'The current chat is saved to your Builder library first. ' : '') +
+      'The messages, scene and characters are cleared; settings and system instructions are kept.')) return;
+    if (had) { try { await archiveCurrent(); toast('Previous chat saved to the library.'); } catch (e) { banner = `Could not save to the library: ${(e as Error).message}`; } }
     state.messages = []; state.scene = ''; state.cast = structuredClone(defaults.cast);
     $<HTMLTextAreaElement>('#scene').value = '';
     syncCastInputs();
@@ -858,6 +877,7 @@ function buildUI() {
         state.settings.systemPrompt = j.system;
       }
       $<HTMLTextAreaElement>('#systemPrompt').value = state.settings.systemPrompt;
+      $<HTMLTextAreaElement>('#memories').value = state.settings.memories;
       $<HTMLInputElement>('#apiKey').value = state.settings.apiKey;
       $<HTMLSelectElement>('#aspect').value = state.settings.aspect;
       Object.values(pickers).forEach(p => p.refresh());
@@ -866,4 +886,23 @@ function buildUI() {
   });
 }
 
-load().then(s => { state = s; buildUI(); render(); });
+function toast(msg: string) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.append(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout((toast as unknown as { h?: number }).h);
+  (toast as unknown as { h?: number }).h = window.setTimeout(() => { t!.hidden = true; }, 3500);
+}
+
+load().then(s => {
+  state = s;
+  buildUI();
+  initBuilder({
+    state: () => state, persist, md, toast,
+    banner: m => { banner = m; render(); },
+    openSidebar: () => { state.settings.sidebar = true; render(); },
+  });
+  pickers.builderModel = modelPicker('b-model', [{ value: '', label: 'Builder model: same as chat model' },
+    ...TEXT_MODELS.map(m => ({ value: m.id, label: m.label }))], () => state.settings.builderModel, v => state.settings.builderModel = v);
+  render();
+});
